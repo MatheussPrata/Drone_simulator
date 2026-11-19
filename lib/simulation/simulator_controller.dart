@@ -63,6 +63,7 @@ class SimulatorController extends ChangeNotifier {
   bool get isMapPrimaryView => _isMapPrimaryView;
   bool get isSatellite => _isSatellite;
   FlightMap get activeMap => physics.activeMap;
+  DroneState get state => physics.state;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
   bool get isHovering => _status == SimulatorStatus.hovering;
