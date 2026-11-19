@@ -1,0 +1,9 @@
+export 'package:drone_simulator/engine/flight_physics_engine.dart';
+export 'package:drone_simulator/simulation/geofence_validator.dart';
+export 'package:drone_simulator/models/drone_state.dart';
+export 'package:drone_simulator/models/flight_map.dart';
+
+import 'package:drone_simulator/engine/flight_physics_engine.dart';
+
+/// Alias de conveniência para a engine de simulação física de voo
+typedef FlightPhysics = FlightPhysicsEngine;

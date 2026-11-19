@@ -25,6 +25,7 @@ class DroneState {
   final bool isGeofenceWarning;
   final bool isGeofenceBreach;
   final bool inNoFlyZone;
+  final bool isNoFlyWarning;
   final String? currentNfzName;
 
   const DroneState({
@@ -48,6 +49,7 @@ class DroneState {
     this.isGeofenceWarning = false,
     this.isGeofenceBreach = false,
     this.inNoFlyZone = false,
+    this.isNoFlyWarning = false,
     this.currentNfzName,
   });
 
@@ -72,6 +74,7 @@ class DroneState {
     bool? isGeofenceWarning,
     bool? isGeofenceBreach,
     bool? inNoFlyZone,
+    bool? isNoFlyWarning,
     String? currentNfzName,
   }) {
     return DroneState(
@@ -94,7 +97,8 @@ class DroneState {
       distanceFromCenter: distanceFromCenter ?? this.distanceFromCenter,
       isGeofenceWarning: isGeofenceWarning ?? this.isGeofenceWarning,
       isGeofenceBreach: isGeofenceBreach ?? this.isGeofenceBreach,
-      inNoFlyZone: inNoFlyZone ?? this.inNoFlyZone,
+      inNoFlyZone: inNoFlyZone ?? isNoFlyWarning ?? this.inNoFlyZone,
+      isNoFlyWarning: isNoFlyWarning ?? inNoFlyZone ?? this.isNoFlyWarning,
       currentNfzName: currentNfzName ?? this.currentNfzName,
     );
   }

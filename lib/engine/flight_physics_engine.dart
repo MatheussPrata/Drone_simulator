@@ -6,6 +6,7 @@ import 'package:drone_simulator/models/drone_state.dart';
 import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/models/waypoint.dart';
+import 'package:drone_simulator/simulation/geofence_validator.dart';
 
 class FlightPhysicsEngine {
   Timer? _timer;
@@ -51,8 +52,15 @@ class FlightPhysicsEngine {
     stop();
   }
 
-  void _tick(Timer t) {
-    const double dt = 0.05;
+  /// Avança a simulação física por um intervalo de tempo [dt] segundos.
+  /// Pode ser chamado manualmente em testes unitários determinísticos.
+  void tick([double dt = 0.05]) {
+    _step(dt);
+  }
+
+  void _tick(Timer t) => tick(0.05);
+
+  void _step(double dt) {
     final profile = _state.activeProfile;
 
     if (_state.flightMode == FlightMode.disarmed) {
@@ -98,52 +106,38 @@ class FlightPhysicsEngine {
     }
 
     // ── Position update ──
-    LatLng newPosition = GeoMath.offsetByMeters(
+    final candidatePosition = GeoMath.offsetByMeters(
       _state.position,
       _velocityX * dt,
       _velocityY * dt,
     );
 
-    // ── Geofence boundary enforcing ──
-    double distFromCenter = GeoMath.distanceMeters(newPosition, _activeMap.center);
-    bool breach = false;
-
-    if (distFromCenter > _activeMap.radiusMeters) {
-      breach = true;
-      // Soft barrier: reposiciona na borda e inverte vetor de velocidade externo
-      final bearingFromCenter = GeoMath.bearing(_activeMap.center, newPosition);
-      final bearingRad = bearingFromCenter * pi / 180.0;
-      newPosition = GeoMath.offsetByMeters(
-        _activeMap.center,
-        sin(bearingRad) * _activeMap.radiusMeters,
-        cos(bearingRad) * _activeMap.radiusMeters,
-      );
-      _velocityX *= -0.2;
-      _velocityY *= -0.2;
-      distFromCenter = _activeMap.radiusMeters;
-    }
-
     // ── Altitude update (com teto máximo do mapa modelado) ──
     double newAltitude = (_state.altitude + _verticalVelocity * dt).clamp(0.0, _activeMap.maxAltitudeMeters);
+    bool altitudeBreach = false;
     if (newAltitude >= _activeMap.maxAltitudeMeters) {
       _verticalVelocity = min(0.0, _verticalVelocity);
-      breach = true;
+      altitudeBreach = true;
     }
 
-    // ── Geofence warning threshold ──
-    final isWarning = distFromCenter >= _activeMap.warningRadiusMeters ||
-        newAltitude >= (_activeMap.maxAltitudeMeters - 15.0);
+    // ── Geofence & No-Fly Zone validation via GeofenceValidator ──
+    final validation = GeofenceValidator.validate(
+      position: candidatePosition,
+      map: _activeMap,
+      velocityX: _velocityX,
+      velocityY: _velocityY,
+      altitude: newAltitude,
+    );
 
-    // ── No-Fly Zone check ──
-    bool inNfz = false;
-    String? nfzName;
-    for (final nfz in _activeMap.noFlyZones) {
-      if (GeoMath.distanceMeters(newPosition, nfz.center) <= nfz.radiusMeters) {
-        inNfz = true;
-        nfzName = nfz.name;
-        break;
-      }
-    }
+    final LatLng newPosition = validation.position;
+    _velocityX = validation.velocityX;
+    _velocityY = validation.velocityY;
+    final double distFromCenter = validation.distanceFromCenter;
+    final bool breach = validation.isGeofenceBreach || altitudeBreach;
+    final bool isWarning = validation.isGeofenceWarning;
+    final bool inNfz = validation.inNoFlyZone;
+    final bool isNfWarning = validation.isNoFlyWarning;
+    final String? nfzName = validation.currentNfzName;
 
     // ── Speed calculation ──
     final horizontalSpeed = sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
@@ -200,6 +194,7 @@ class FlightPhysicsEngine {
       isGeofenceWarning: isWarning,
       isGeofenceBreach: breach,
       inNoFlyZone: inNfz,
+      isNoFlyWarning: isNfWarning,
       currentNfzName: nfzName,
     );
 
