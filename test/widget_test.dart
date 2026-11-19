@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:drone_simulator/main.dart';
-import 'package:drone_simulator/widgets/map_canvas.dart';
+import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 import 'package:drone_simulator/widgets/virtual_joystick.dart';
 
@@ -10,7 +10,7 @@ void main() {
     await tester.pump();
 
     expect(find.byType(FlightSimulatorScreen), findsOneWidget);
-    expect(find.byType(MapCanvas), findsOneWidget);
+    expect(find.byType(MiniMapWidget), findsOneWidget);
     expect(find.byType(TelemetryHud), findsOneWidget);
     expect(find.byType(VirtualJoystick), findsNWidgets(2));
     expect(find.text('THROTTLE / YAW'), findsOneWidget);

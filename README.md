@@ -77,8 +77,9 @@ A interface utiliza o padrão mundial de pilotagem de drones e aeromodelos (**Mo
 
 ```
 lib/
-├── main.dart                          # Ponto de entrada (landscape forçado, Stack principal)
+├── main.dart                          # Ponto de entrada (landscape forçado, Stack principal com mapa real)
 ├── widgets/
+│   ├── mini_map_widget.dart           # Mapa real (Satélite/OSM) com geofence, zonas No-Fly e drone dinâmico
 │   ├── map_canvas.dart                # Canvas 2D nativo (grade, geofence, NFZs e sombra por altitude)
 │   ├── telemetry_hud.dart             # Barra superior (Alt, Vel, Home, Bateria, Ações e Alertas)
 │   └── virtual_joystick.dart          # Joystick analógico circular desacoplado com autocentralização

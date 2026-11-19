@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
-import 'package:drone_simulator/widgets/map_canvas.dart';
+import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 import 'package:drone_simulator/widgets/virtual_joystick.dart';
 
@@ -65,9 +65,9 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Camada 1: Mapa Tático 2D Nativo (Fundo) ──
+          // ── Camada 1: Mapa Real (Satélite / OpenStreetMap) com Geofence e NFZ ──
           Positioned.fill(
-            child: MapCanvas(
+            child: MiniMapWidget(
               controller: _controller,
               followDrone: true,
             ),

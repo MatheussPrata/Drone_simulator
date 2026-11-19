@@ -1,3 +1,5 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:drone_simulator/core/utils/geo_math.dart';
@@ -88,6 +90,33 @@ class FlightMap {
     this.presetMissions = const [],
   });
 
+  /// Coordenada central padrão para o ponto Home (0,0) (Parque Villa-Lobos / Drone Park)
+  static const LatLng defaultHome = LatLng(-23.5475, -46.7230);
+
+  /// Converte deslocamento cartesiano (x, y) em metros do DroneState para coordenadas geográficas [LatLng].
+  ///
+  /// [x]: metros para leste (+X) ou oeste (-X)
+  /// [y]: metros para norte (+Y) ou sul (-Y)
+  /// [origin]: ponto central de referência (padrão: [defaultHome])
+  static LatLng metersToLatLng(double x, double y, [LatLng origin = defaultHome]) {
+    return GeoMath.offsetByMeters(origin, x, y);
+  }
+
+  /// Converte coordenadas geográficas [LatLng] para deslocamento cartesiano (x, y) em metros em relação a [origin].
+  static Offset latLngToMeters(LatLng position, [LatLng origin = defaultHome]) {
+    final dLat = position.latitude - origin.latitude;
+    final dLon = position.longitude - origin.longitude;
+    const earthRadius = 6371000.0;
+    final y = dLat * (pi / 180.0) * earthRadius;
+    final x = dLon * (pi / 180.0) * earthRadius * cos(origin.latitude * pi / 180.0);
+    return Offset(x, y);
+  }
+
+  /// Converte (x, y) em metros relativos a este mapa para [LatLng].
+  LatLng positionToLatLng(double x, double y) {
+    return GeoMath.offsetByMeters(center, x, y);
+  }
+
   LatLngBounds get bounds {
     final sw = GeoMath.offsetByMeters(center, -radiusMeters - 200, -radiusMeters - 200);
     final ne = GeoMath.offsetByMeters(center, radiusMeters + 200, radiusMeters + 200);
@@ -100,7 +129,7 @@ class FlightMap {
 
   /// 1. Drone Park (Campo de Treinamento Oficial - 500m de raio / 1 km²)
   static final FlightMap dronePark = () {
-    const center = LatLng(-23.5475, -46.7230);
+    const center = defaultHome;
     final g1 = GeoMath.offsetByMeters(center, 0, 160);
     final g2 = GeoMath.offsetByMeters(center, 180, 0);
     final g3 = GeoMath.offsetByMeters(center, 0, -160);
