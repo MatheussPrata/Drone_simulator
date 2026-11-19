@@ -187,6 +187,7 @@ class FpvCameraView extends StatefulWidget {
   final bool showLandmarks;
   final bool showGroundMap;
   final bool transparentGround;
+  final bool? isSatellite;
 
   const FpvCameraView({
     super.key,
@@ -205,6 +206,7 @@ class FpvCameraView extends StatefulWidget {
     this.showLandmarks = true,
     this.showGroundMap = true,
     this.transparentGround = true,
+    this.isSatellite,
   });
 
   @override
@@ -272,6 +274,7 @@ class _FpvCameraViewState extends State<FpvCameraView> {
     required double curRoll,
     required double curGimbal,
     required FlightMap activeMap,
+    required bool isSatellite,
   }) {
     final droneLatLng = FlightMap.metersToLatLng(curX, curY, activeMap.center);
     final altitudeClamped = curZ.clamp(0.0, 150.0);
@@ -326,8 +329,9 @@ class _FpvCameraViewState extends State<FpvCameraView> {
                     ),
                     children: [
                       TileLayer(
-                        urlTemplate:
-                            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                        urlTemplate: isSatellite
+                            ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                            : 'https://tile.openstreetmap.org/{z}/{y}/{x}.png',
                         userAgentPackageName: 'com.dronesim.drone_simulator',
                       ),
                     ],
@@ -356,13 +360,14 @@ class _FpvCameraViewState extends State<FpvCameraView> {
     final activeMap = widget.flightMap ??
         ctrl?.physics.activeMap ??
         FlightMap.dronePark;
+    final isSatellite = widget.isSatellite ?? ctrl?.isSatellite ?? true;
 
     return SizedBox.expand(
       child: ClipRect(
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Camada de Projeção do Terreno Real (Satélite) em Perspectiva 3D
+            // Camada de Projeção do Terreno Real (Satélite / Ruas) em Perspectiva 3D
             if (widget.showGroundMap)
               _buildGroundMap(
                 curX: curX,
@@ -373,6 +378,7 @@ class _FpvCameraViewState extends State<FpvCameraView> {
                 curRoll: curRoll,
                 curGimbal: curGimbal,
                 activeMap: activeMap,
+                isSatellite: isSatellite,
               ),
 
             // Camada 3D vetorial (Céu, Grade, Pista, Heliponto H, Geofence, Marcos, OSD)

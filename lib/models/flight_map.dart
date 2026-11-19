@@ -124,6 +124,56 @@ class FlightMap {
   }
 
   // ────────────────────────────────────────────────────────────
+  // Locais Pré-Definidos de Decolagem (Paranavaí e Região)
+  // ────────────────────────────────────────────────────────────
+
+  /// Paranavaí - Centro (Praça dos Pioneiros / Área Urbana)
+  static final FlightMap paranavaiCentro = FlightMap(
+    id: 'paranavai_centro',
+    name: 'Paranavaí - Centro',
+    description: 'Área urbana central ao redor da Praça dos Pioneiros.',
+    center: const LatLng(-23.0825, -52.4639),
+    homePosition: const LatLng(-23.0825, -52.4639),
+    radiusMeters: 500.0,
+    warningRadiusMeters: 400.0,
+    maxAltitudeMeters: 120.0,
+    initialZoom: 16.5,
+  );
+
+  /// Parque / Área Verde (Parque Ouro Branco / Bosque)
+  static final FlightMap paranavaiParque = FlightMap(
+    id: 'paranavai_parque',
+    name: 'Parque / Área Verde',
+    description: 'Área verde arborizada ideal para voo livre e manobras visuais.',
+    center: const LatLng(-23.0760, -52.4550),
+    homePosition: const LatLng(-23.0760, -52.4550),
+    radiusMeters: 500.0,
+    warningRadiusMeters: 400.0,
+    maxAltitudeMeters: 120.0,
+    initialZoom: 16.5,
+  );
+
+  /// Represa / Lago (Parque das Nações / Espelho D'água)
+  static final FlightMap paranavaiRepresa = FlightMap(
+    id: 'paranavai_represa',
+    name: 'Represa / Lago',
+    description: 'Espelho d’água e área aberta para voos panorâmicos de longa distância.',
+    center: const LatLng(-23.0910, -52.4720),
+    homePosition: const LatLng(-23.0910, -52.4720),
+    radiusMeters: 500.0,
+    warningRadiusMeters: 400.0,
+    maxAltitudeMeters: 120.0,
+    initialZoom: 16.5,
+  );
+
+  /// Lista dos 3 locais pré-definidos de decolagem
+  static List<FlightMap> get predefinedTakeoffLocations => [
+        paranavaiCentro,
+        paranavaiParque,
+        paranavaiRepresa,
+      ];
+
+  // ────────────────────────────────────────────────────────────
   // Cenários modelados prontos com dimensões ideais de voo
   // ────────────────────────────────────────────────────────────
 

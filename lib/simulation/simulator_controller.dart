@@ -40,6 +40,7 @@ class SimulatorController extends ChangeNotifier {
   bool _isArmed = false;
   CameraViewMode _cameraMode = CameraViewMode.fpv;
   bool _isMapPrimaryView = false;
+  bool _isSatellite = true;
 
   double _manualThrottle = 0.0;
   double _manualYaw = 0.0;
@@ -60,6 +61,8 @@ class SimulatorController extends ChangeNotifier {
   double get visualRoll => physics.visualRoll;
   CameraViewMode get cameraMode => _cameraMode;
   bool get isMapPrimaryView => _isMapPrimaryView;
+  bool get isSatellite => _isSatellite;
+  FlightMap get activeMap => physics.activeMap;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
   bool get isHovering => _status == SimulatorStatus.hovering;
@@ -96,6 +99,26 @@ class SimulatorController extends ChangeNotifier {
       _isMapPrimaryView = isPrimary;
       notifyListeners();
     }
+  }
+
+  /// Alterna entre Satélite (ArcGIS) e Mapa de Ruas (OpenStreetMap)
+  void toggleTileLayer() {
+    _isSatellite = !_isSatellite;
+    notifyListeners();
+  }
+
+  /// Define explicitamente se deve usar Satélite ou Mapa de Ruas
+  void setSatellite(bool value) {
+    if (_isSatellite != value) {
+      _isSatellite = value;
+      notifyListeners();
+    }
+  }
+
+  /// Seleciona um local pré-definido de decolagem, redefinindo o ponto Home (0,0) e resetando o voo
+  void selectTakeoffLocation(FlightMap map) {
+    physics.selectMap(map);
+    reset();
   }
 
   /// Inicia o loop de atualização a 60 FPS

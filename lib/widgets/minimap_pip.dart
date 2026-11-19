@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/widgets/fpv_camera_view.dart';
+import 'package:drone_simulator/widgets/map_settings_modal.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
 
 /// Card Picture-in-Picture (PiP) arredondado posicionado no canto da tela.
@@ -67,6 +68,38 @@ class MiniMapPip extends StatelessWidget {
                             showOsd: false,
                             showGroundMap: true,
                           ),
+                  ),
+
+                  // Botão discreto de camadas no canto do minimapa
+                  Positioned(
+                    top: 5,
+                    left: 5,
+                    child: GestureDetector(
+                      key: const Key('pip_layers_button'),
+                      onTap: () => MapSettingsModal.show(context, controller),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.85),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: Colors.cyanAccent.withOpacity(0.7),
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.5),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.layers,
+                          size: 13,
+                          color: Colors.cyanAccent,
+                        ),
+                      ),
+                    ),
                   ),
 
                   // Botão de expandir / alternar (Swap) com indicação visual [ ] MAPA / FPV

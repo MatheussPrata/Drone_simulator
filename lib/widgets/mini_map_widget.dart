@@ -55,7 +55,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
   @override
   void initState() {
     super.initState();
-    _isSatellite = widget.isSatellite;
+    _isSatellite = widget.controller?.isSatellite ?? widget.isSatellite;
     _followDrone = widget.followDrone;
     widget.controller?.addListener(_onControllerUpdate);
   }
@@ -67,6 +67,9 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
       oldWidget.controller?.removeListener(_onControllerUpdate);
       widget.controller?.addListener(_onControllerUpdate);
     }
+    if (widget.controller != null) {
+      _isSatellite = widget.controller!.isSatellite;
+    }
   }
 
   @override
@@ -77,14 +80,18 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
 
   void _onControllerUpdate() {
     if (!mounted) return;
-    setState(() {});
-
     final ctrl = widget.controller;
-    if (ctrl != null && _followDrone) {
-      final activeMap = widget.flightMap ?? ctrl.physics.activeMap;
-      final currentLatLng = FlightMap.metersToLatLng(ctrl.x, ctrl.y, activeMap.center);
-      _mapController.move(currentLatLng, _mapController.camera.zoom);
+    if (ctrl != null) {
+      if (_isSatellite != ctrl.isSatellite) {
+        _isSatellite = ctrl.isSatellite;
+      }
+      if (_followDrone) {
+        final activeMap = widget.flightMap ?? ctrl.physics.activeMap;
+        final currentLatLng = FlightMap.metersToLatLng(ctrl.x, ctrl.y, activeMap.center);
+        _mapController.move(currentLatLng, _mapController.camera.zoom);
+      }
     }
+    setState(() {});
   }
 
   void _checkMapChange(FlightMap activeMap) {
@@ -301,6 +308,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                       setState(() {
                         _isSatellite = !_isSatellite;
                       });
+                      widget.controller?.setSatellite(_isSatellite);
                     },
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),

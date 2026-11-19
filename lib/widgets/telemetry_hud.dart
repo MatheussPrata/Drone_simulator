@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/widgets/map_settings_modal.dart';
 
 /// Posição dos botões de ação do HUD
 enum HudActionsPlacement {
@@ -192,6 +193,7 @@ class TelemetryHud extends StatelessWidget {
                         cameraMode: curCameraMode,
                         onToggle: toggleCameraCb,
                       ),
+                      _buildMapSettingsButton(context),
                       FlightActionButtons(
                         onTakeoff: takeoffCb,
                         onLand: landCb,
@@ -262,6 +264,49 @@ class TelemetryHud extends StatelessWidget {
                 label,
                 style: TextStyle(
                   color: isEnabled ? color : Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapSettingsButton(BuildContext context) {
+    if (controller == null) return const SizedBox.shrink();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('btn_map_settings'),
+        onTap: () => MapSettingsModal.show(context, controller!),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.cyanAccent.withOpacity(0.18),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Colors.cyanAccent.withOpacity(0.6),
+              width: 1.0,
+            ),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.layers,
+                size: 14,
+                color: Colors.cyanAccent,
+              ),
+              SizedBox(width: 4),
+              Text(
+                'Camadas',
+                style: TextStyle(
+                  color: Colors.cyanAccent,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                 ),
