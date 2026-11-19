@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:drone_simulator/models/drone_state.dart';
 import 'package:drone_simulator/models/drone_profile.dart';
+import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/models/waypoint.dart';
 import 'package:drone_simulator/engine/flight_physics_engine.dart';
 
@@ -11,12 +12,8 @@ class SimulationNotifier extends StateNotifier<DroneState> {
   int _nextWaypointId = 1;
 
   SimulationNotifier()
-      : _engine = FlightPhysicsEngine(LatLng(-23.5505, -46.6333)),
-        super(DroneState(
-          position: LatLng(-23.5505, -46.6333),
-          homePosition: LatLng(-23.5505, -46.6333),
-          activeProfile: DroneProfile.mini249g,
-        )) {
+      : _engine = FlightPhysicsEngine(initialMap: FlightMap.dronePark),
+        super(FlightPhysicsEngine(initialMap: FlightMap.dronePark).state) {
     _engine.onStateChanged = (newState) {
       if (mounted) {
         state = newState;
@@ -56,6 +53,18 @@ class SimulationNotifier extends StateNotifier<DroneState> {
   void clearWaypoints() {
     _waypoints.clear();
     _nextWaypointId = 1;
+  }
+
+  void selectMap(FlightMap map) {
+    clearWaypoints();
+    _engine.selectMap(map);
+  }
+
+  void loadPresetMission(PresetMission mission) {
+    _waypoints.clear();
+    _waypoints.addAll(mission.waypoints);
+    _nextWaypointId = _waypoints.length + 1;
+    _engine.startMission(_waypoints);
   }
 
   void setWindSpeed(double kmh) => _engine.setWindSpeed(kmh);

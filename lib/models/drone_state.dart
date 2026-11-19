@@ -1,5 +1,6 @@
 import 'package:latlong2/latlong.dart';
 import 'drone_profile.dart';
+import 'flight_map.dart';
 
 enum FlightMode { disarmed, hover, manual, autoMission, rtl, landing }
 
@@ -19,6 +20,12 @@ class DroneState {
   final double windSpeedKmh;
   final double windDirectionDeg;
   final DroneProfile activeProfile;
+  final FlightMap activeMap;
+  final double distanceFromCenter;
+  final bool isGeofenceWarning;
+  final bool isGeofenceBreach;
+  final bool inNoFlyZone;
+  final String? currentNfzName;
 
   const DroneState({
     required this.position,
@@ -36,6 +43,12 @@ class DroneState {
     this.windSpeedKmh = 0.0,
     this.windDirectionDeg = 0.0,
     required this.activeProfile,
+    required this.activeMap,
+    this.distanceFromCenter = 0.0,
+    this.isGeofenceWarning = false,
+    this.isGeofenceBreach = false,
+    this.inNoFlyZone = false,
+    this.currentNfzName,
   });
 
   DroneState copyWith({
@@ -54,6 +67,12 @@ class DroneState {
     double? windSpeedKmh,
     double? windDirectionDeg,
     DroneProfile? activeProfile,
+    FlightMap? activeMap,
+    double? distanceFromCenter,
+    bool? isGeofenceWarning,
+    bool? isGeofenceBreach,
+    bool? inNoFlyZone,
+    String? currentNfzName,
   }) {
     return DroneState(
       position: position ?? this.position,
@@ -71,6 +90,12 @@ class DroneState {
       windSpeedKmh: windSpeedKmh ?? this.windSpeedKmh,
       windDirectionDeg: windDirectionDeg ?? this.windDirectionDeg,
       activeProfile: activeProfile ?? this.activeProfile,
+      activeMap: activeMap ?? this.activeMap,
+      distanceFromCenter: distanceFromCenter ?? this.distanceFromCenter,
+      isGeofenceWarning: isGeofenceWarning ?? this.isGeofenceWarning,
+      isGeofenceBreach: isGeofenceBreach ?? this.isGeofenceBreach,
+      inNoFlyZone: inNoFlyZone ?? this.inNoFlyZone,
+      currentNfzName: currentNfzName ?? this.currentNfzName,
     );
   }
 }

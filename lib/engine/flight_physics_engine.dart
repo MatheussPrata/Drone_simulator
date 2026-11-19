@@ -4,11 +4,13 @@ import 'package:latlong2/latlong.dart';
 import 'package:drone_simulator/core/utils/geo_math.dart';
 import 'package:drone_simulator/models/drone_state.dart';
 import 'package:drone_simulator/models/drone_profile.dart';
+import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/models/waypoint.dart';
 
 class FlightPhysicsEngine {
   Timer? _timer;
   DroneState _state;
+  FlightMap _activeMap;
   List<Waypoint> _waypoints = [];
   int _currentWaypointIndex = 0;
   double _hoverTimer = 0.0;
@@ -24,12 +26,15 @@ class FlightPhysicsEngine {
   Function(DroneState)? onStateChanged;
 
   DroneState get state => _state;
+  FlightMap get activeMap => _activeMap;
 
-  FlightPhysicsEngine(LatLng initialPosition)
-      : _state = DroneState(
-          position: initialPosition,
-          homePosition: initialPosition,
+  FlightPhysicsEngine({FlightMap? initialMap})
+      : _activeMap = initialMap ?? FlightMap.dronePark,
+        _state = DroneState(
+          position: (initialMap ?? FlightMap.dronePark).homePosition,
+          homePosition: (initialMap ?? FlightMap.dronePark).homePosition,
           activeProfile: DroneProfile.mini249g,
+          activeMap: initialMap ?? FlightMap.dronePark,
         );
 
   void start() {
@@ -93,14 +98,52 @@ class FlightPhysicsEngine {
     }
 
     // ── Position update ──
-    final newPosition = GeoMath.offsetByMeters(
+    LatLng newPosition = GeoMath.offsetByMeters(
       _state.position,
       _velocityX * dt,
       _velocityY * dt,
     );
 
-    // ── Altitude update ──
-    double newAltitude = (_state.altitude + _verticalVelocity * dt).clamp(0.0, 500.0);
+    // ── Geofence boundary enforcing ──
+    double distFromCenter = GeoMath.distanceMeters(newPosition, _activeMap.center);
+    bool breach = false;
+
+    if (distFromCenter > _activeMap.radiusMeters) {
+      breach = true;
+      // Soft barrier: reposiciona na borda e inverte vetor de velocidade externo
+      final bearingFromCenter = GeoMath.bearing(_activeMap.center, newPosition);
+      final bearingRad = bearingFromCenter * pi / 180.0;
+      newPosition = GeoMath.offsetByMeters(
+        _activeMap.center,
+        sin(bearingRad) * _activeMap.radiusMeters,
+        cos(bearingRad) * _activeMap.radiusMeters,
+      );
+      _velocityX *= -0.2;
+      _velocityY *= -0.2;
+      distFromCenter = _activeMap.radiusMeters;
+    }
+
+    // ── Altitude update (com teto máximo do mapa modelado) ──
+    double newAltitude = (_state.altitude + _verticalVelocity * dt).clamp(0.0, _activeMap.maxAltitudeMeters);
+    if (newAltitude >= _activeMap.maxAltitudeMeters) {
+      _verticalVelocity = min(0.0, _verticalVelocity);
+      breach = true;
+    }
+
+    // ── Geofence warning threshold ──
+    final isWarning = distFromCenter >= _activeMap.warningRadiusMeters ||
+        newAltitude >= (_activeMap.maxAltitudeMeters - 15.0);
+
+    // ── No-Fly Zone check ──
+    bool inNfz = false;
+    String? nfzName;
+    for (final nfz in _activeMap.noFlyZones) {
+      if (GeoMath.distanceMeters(newPosition, nfz.center) <= nfz.radiusMeters) {
+        inNfz = true;
+        nfzName = nfz.name;
+        break;
+      }
+    }
 
     // ── Speed calculation ──
     final horizontalSpeed = sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
@@ -153,6 +196,11 @@ class FlightPhysicsEngine {
       batteryPercent: newBattery,
       voltage: newVoltage,
       flightMode: newMode,
+      distanceFromCenter: distFromCenter,
+      isGeofenceWarning: isWarning,
+      isGeofenceBreach: breach,
+      inNoFlyZone: inNfz,
+      currentNfzName: nfzName,
     );
 
     onStateChanged?.call(_state);
@@ -160,34 +208,45 @@ class FlightPhysicsEngine {
 
   void _processManualFlight(
       double dt, DroneProfile profile, double windForceX, double windForceY) {
-    // Yaw control - rotate heading
-    double newHeading = _state.heading + _manualYaw * 180.0 * dt;
-    newHeading = (newHeading + 360.0) % 360.0;
+    // Heading rotation (yaw)
+    const double yawRate = 120.0; // deg/sec
+    double newHeading = (_state.heading + _manualYaw * yawRate * dt) % 360.0;
+    if (newHeading < 0) newHeading += 360.0;
 
-    // Throttle - vertical speed
+    // Vertical velocity (throttle)
     if (_manualThrottle.abs() > 0.05) {
-      if (_manualThrottle > 0) {
-        _verticalVelocity = _manualThrottle * profile.maxAscentMs;
-      } else {
-        _verticalVelocity = _manualThrottle * profile.maxDescentMs;
-      }
+      _verticalVelocity = _manualThrottle > 0
+          ? _manualThrottle * profile.maxAscentMs
+          : _manualThrottle * profile.maxDescentMs;
     } else {
-      _verticalVelocity *= 0.9; // decay to hover
+      _verticalVelocity *= 0.9; // hover damping
+      if (_verticalVelocity.abs() < 0.05) _verticalVelocity = 0.0;
     }
 
-    // Pitch/Roll - horizontal movement relative to heading
+    // Pitch & roll translate to local forward/backward & strafe
     final headingRad = newHeading * pi / 180.0;
-    final forwardAccel = -_manualPitch * profile.accelerationMs2;
-    final lateralAccel = _manualRoll * profile.accelerationMs2;
+    final forwardX = sin(headingRad);
+    final forwardY = cos(headingRad);
+    final rightX = cos(headingRad);
+    final rightY = -sin(headingRad);
 
-    _velocityX += (forwardAccel * sin(headingRad) + lateralAccel * cos(headingRad)) * dt;
-    _velocityY += (forwardAccel * cos(headingRad) - lateralAccel * sin(headingRad)) * dt;
+    final inputAccelX =
+        (forwardX * _manualPitch + rightX * _manualRoll) * profile.accelerationMs2;
+    final inputAccelY =
+        (forwardY * _manualPitch + rightY * _manualRoll) * profile.accelerationMs2;
 
-    // Drag for smooth deceleration
-    _velocityX *= 0.95;
-    _velocityY *= 0.95;
+    _velocityX += inputAccelX * dt;
+    _velocityY += inputAccelY * dt;
 
-    // Clamp to max speed
+    // Aerodynamic drag
+    if (_manualPitch.abs() < 0.05 && _manualRoll.abs() < 0.05) {
+      _velocityX *= 0.92;
+      _velocityY *= 0.92;
+      if (_velocityX.abs() < 0.05) _velocityX = 0.0;
+      if (_velocityY.abs() < 0.05) _velocityY = 0.0;
+    }
+
+    // Clamp horizontal speed to profile max
     final maxSpeedMs = profile.maxSpeedKmh / 3.6;
     final currentSpeed = sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
     if (currentSpeed > maxSpeedMs) {
@@ -203,8 +262,6 @@ class FlightPhysicsEngine {
       double dt, DroneProfile profile, double windForceX, double windForceY) {
     if (_waypoints.isEmpty || _currentWaypointIndex >= _waypoints.length) {
       _state = _state.copyWith(flightMode: FlightMode.hover);
-      _velocityX *= 0.9;
-      _velocityY *= 0.9;
       return;
     }
 
@@ -212,7 +269,7 @@ class FlightPhysicsEngine {
     final distance = GeoMath.distanceMeters(_state.position, target.position);
     final targetBearing = GeoMath.bearing(_state.position, target.position);
 
-    // Smooth heading rotation towards target
+    // Smooth heading rotation toward waypoint
     double headingDiff = targetBearing - _state.heading;
     if (headingDiff > 180) headingDiff -= 360;
     if (headingDiff < -180) headingDiff += 360;
@@ -232,7 +289,7 @@ class FlightPhysicsEngine {
     }
 
     if (distance > 3.0) {
-      // Navigate towards waypoint
+      // Navigate toward waypoint
       _hoverTimer = 0.0;
       final headingRad = newHeading * pi / 180.0;
       final cruiseSpeed = (profile.maxSpeedKmh * 0.6) / 3.6; // 60% max speed
@@ -324,6 +381,21 @@ class FlightPhysicsEngine {
   }
 
   // ── Public API ──
+
+  void selectMap(FlightMap newMap) {
+    _activeMap = newMap;
+    if (_state.flightMode == FlightMode.disarmed) {
+      _state = _state.copyWith(
+        activeMap: newMap,
+        position: newMap.homePosition,
+        homePosition: newMap.homePosition,
+        altitude: 0.0,
+      );
+    } else {
+      _state = _state.copyWith(activeMap: newMap);
+    }
+    onStateChanged?.call(_state);
+  }
 
   void setManualInput(double throttle, double yaw, double pitch, double roll) {
     _manualThrottle = throttle.clamp(-1.0, 1.0);

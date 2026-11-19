@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:drone_simulator/models/drone_state.dart';
+import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/providers/simulation_provider.dart';
 import 'package:drone_simulator/ui/widgets/telemetry_bar.dart';
 import 'package:drone_simulator/ui/widgets/artificial_horizon.dart';
@@ -21,6 +21,7 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
   final MapController _mapController = MapController();
   bool _useSatelliteMap = true;
   bool _showTip = true;
+  String? _lastMapId;
   double _currentThrottle = 0.0;
   double _currentYaw = 0.0;
   double _currentPitch = 0.0;
@@ -33,11 +34,23 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
+  void _checkMapChange(FlightMap activeMap) {
+    if (_lastMapId != activeMap.id) {
+      _lastMapId = activeMap.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _mapController.move(activeMap.center, activeMap.initialZoom);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final droneState = ref.watch(simulationProvider);
     final notifier = ref.read(simulationProvider.notifier);
     final waypoints = notifier.waypoints;
+    final activeMap = droneState.activeMap;
+
+    _checkMapChange(activeMap);
 
     return Scaffold(
       body: Stack(
@@ -46,8 +59,11 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: LatLng(-23.5505, -46.6333),
-              initialZoom: 17.0,
+              initialCenter: activeMap.center,
+              initialZoom: activeMap.initialZoom,
+              cameraConstraint: CameraConstraint.containCenter(
+                bounds: activeMap.bounds,
+              ),
               onTap: (tapPosition, latLng) {
                 notifier.addWaypoint(latLng);
               },
@@ -59,7 +75,62 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                     : 'https://tile.openstreetmap.org/{z}/{y}/{x}.png',
                 userAgentPackageName: 'com.dronesim.drone_simulator',
               ),
-              // Waypoint polyline
+
+              // ── Geofence, Warnings, NFZs & Helipads ──
+              CircleLayer(
+                circles: [
+                  // 1. Área de Voo Autorizada (Geofence principal)
+                  CircleMarker(
+                    point: activeMap.center,
+                    radius: activeMap.radiusMeters,
+                    useRadiusInMeter: true,
+                    color: Colors.cyan.withOpacity(0.04),
+                    borderColor: droneState.isGeofenceBreach
+                        ? Colors.redAccent
+                        : Colors.cyanAccent.withOpacity(0.7),
+                    borderStrokeWidth: 2.0,
+                  ),
+                  // 2. Anel de Advertência de Proximidade (80% da área)
+                  CircleMarker(
+                    point: activeMap.center,
+                    radius: activeMap.warningRadiusMeters,
+                    useRadiusInMeter: true,
+                    color: Colors.transparent,
+                    borderColor: Colors.amberAccent.withOpacity(0.4),
+                    borderStrokeWidth: 1.5,
+                  ),
+                  // 3. No-Fly Zones (NFZ) modeladas
+                  ...activeMap.noFlyZones.map(
+                    (nfz) => CircleMarker(
+                      point: nfz.center,
+                      radius: nfz.radiusMeters,
+                      useRadiusInMeter: true,
+                      color: Colors.red.withOpacity(0.24),
+                      borderColor: Colors.redAccent,
+                      borderStrokeWidth: 2.0,
+                    ),
+                  ),
+                  // 4. Helipad central (círculos concêntricos de pouso)
+                  CircleMarker(
+                    point: droneState.homePosition,
+                    radius: 20.0,
+                    useRadiusInMeter: true,
+                    color: Colors.blue.withOpacity(0.12),
+                    borderColor: Colors.blueAccent.withOpacity(0.8),
+                    borderStrokeWidth: 1.5,
+                  ),
+                  CircleMarker(
+                    point: droneState.homePosition,
+                    radius: 6.0,
+                    useRadiusInMeter: true,
+                    color: Colors.blue.withOpacity(0.25),
+                    borderColor: Colors.white,
+                    borderStrokeWidth: 2.0,
+                  ),
+                ],
+              ),
+
+              // ── Waypoint polylines ──
               if (waypoints.length >= 2)
                 PolylineLayer(
                   polylines: [
@@ -71,53 +142,99 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                     ),
                   ],
                 ),
-              // Line from drone to first waypoint during mission
+              // Linha do drone até o primeiro waypoint em missão
               if (droneState.flightMode == FlightMode.autoMission &&
                   waypoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
                     Polyline(
                       points: [droneState.position, waypoints.first.position],
-                      color: Colors.cyan.withOpacity(0.5),
+                      color: Colors.cyan.withOpacity(0.6),
                       strokeWidth: 1.5,
                       isDotted: true,
                     ),
                   ],
                 ),
-              // Markers layer
+
+              // ── Markers Layer ──
               MarkerLayer(
                 markers: [
-                  // Home marker
-                  if (droneState.flightMode != FlightMode.disarmed)
-                    Marker(
-                      point: droneState.homePosition,
-                      width: 32,
-                      height: 32,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.blue.shade700,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 4,
-                            ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'H',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
+                  // 1. Helipad Home Marker
+                  Marker(
+                    point: droneState.homePosition,
+                    width: 32,
+                    height: 32,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.blue.shade700,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'H',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
                           ),
                         ),
                       ),
                     ),
-                  // Waypoint markers
+                  ),
+
+                  // 2. No-Fly Zone Labels
+                  ...activeMap.noFlyZones.map(
+                    (nfz) => Marker(
+                      point: nfz.center,
+                      width: 100,
+                      height: 28,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.8),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.redAccent, width: 1),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.block, color: Colors.redAccent, size: 12),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                nfz.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.redAccent,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // 3. Map POIs & Obstacles (Gates, Torres, Birutas)
+                  ...activeMap.pois.map(
+                    (poi) => Marker(
+                      point: poi.position,
+                      width: 40,
+                      height: 40,
+                      child: _buildPoiWidget(poi),
+                    ),
+                  ),
+
+                  // 4. Waypoint Markers
                   ...waypoints.map(
                     (wp) => Marker(
                       point: wp.position,
@@ -142,7 +259,8 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                       ),
                     ),
                   ),
-                  // Drone marker
+
+                  // 5. Drone Marker
                   Marker(
                     point: droneState.position,
                     width: 44,
@@ -168,6 +286,17 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
             child: TelemetryBar(),
           ),
 
+          // ── Layer 2b: Geofence & NFZ HUD Alert Banner ──
+          if (droneState.inNoFlyZone ||
+              droneState.isGeofenceBreach ||
+              droneState.isGeofenceWarning)
+            Positioned(
+              top: 60,
+              left: 140,
+              right: 140,
+              child: _buildWarningHud(droneState),
+            ),
+
           // ── Layer 3: Artificial horizon ──
           Positioned(
             top: 64,
@@ -184,16 +313,16 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
           Positioned(
             right: 10,
             top: 204,
-            bottom: 160,
+            bottom: 155,
             child: SingleChildScrollView(
               child: Container(
                 width: 140,
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
+                  color: Colors.black.withOpacity(0.75),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.cyan.withOpacity(0.2),
+                    color: Colors.cyan.withOpacity(0.3),
                     width: 1,
                   ),
                 ),
@@ -215,7 +344,7 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                     ),
                     const SizedBox(height: 4),
                     _buildActionButton(
-                      'RTL',
+                      'RTL (VOLTAR)',
                       Icons.home,
                       Colors.red,
                       () => notifier.triggerRTL(),
@@ -229,12 +358,26 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                     ),
                     const SizedBox(height: 4),
                     _buildActionButton(
+                      'ROTAS PRONTAS',
+                      Icons.auto_awesome,
+                      Colors.purpleAccent,
+                      () => _showPresetMissionsDialog(context, activeMap, notifier),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildActionButton(
+                      'CENTRALIZAR',
+                      Icons.my_location,
+                      Colors.cyanAccent,
+                      () => _recenterMap(droneState),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildActionButton(
                       'LIMPAR ROTA',
                       Icons.delete_outline,
                       Colors.grey,
                       () => notifier.clearWaypoints(),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     // Wind slider
                     Text(
                       'Vento: ${_windSliderValue.toStringAsFixed(0)} km/h',
@@ -380,7 +523,7 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
               child: GestureDetector(
                 onTap: () => setState(() => _showTip = false),
                 child: Container(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withOpacity(0.55),
                   child: Center(
                     child: Container(
                       margin: const EdgeInsets.symmetric(horizontal: 60),
@@ -389,12 +532,12 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                         color: Colors.grey.shade900,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.cyan.withOpacity(0.4),
+                          color: Colors.cyan.withOpacity(0.5),
                           width: 1,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.cyan.withOpacity(0.1),
+                            color: Colors.cyan.withOpacity(0.15),
                             blurRadius: 20,
                           ),
                         ],
@@ -407,27 +550,29 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                             color: Colors.cyan,
                             size: 48,
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           const Text(
-                            'Drone Simulator v1.0',
+                            'Drone Simulator — Área Modelada',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 20,
+                              fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 10),
                           const Text(
-                            'Toque no mapa para criar uma rota autônoma\n'
-                            'ou use os controles na tela para pilotar.',
-                            textAlign: TextAlign.center,
+                            '• Área autorizada (Geofence): Raio de 500m / Teto 120m\n'
+                            '• Ponto de decolagem "H" central com círculos de aproximação\n'
+                            '• Toque no mapa para criar rotas ou use "ROTAS PRONTAS"\n'
+                            '• Evite as áreas vermelhas (No-Fly Zones)',
+                            textAlign: TextAlign.left,
                             style: TextStyle(
                               color: Colors.white70,
-                              fontSize: 14,
+                              fontSize: 13,
                               height: 1.5,
                             ),
                           ),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 18),
                           ElevatedButton(
                             onPressed: () => setState(() => _showTip = false),
                             style: ElevatedButton.styleFrom(
@@ -442,10 +587,10 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
                               ),
                             ),
                             child: const Text(
-                              'ENTENDI',
+                              'COMEÇAR A VOAR',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                                fontSize: 15,
                               ),
                             ),
                           ),
@@ -458,6 +603,189 @@ class _SimulatorScreenState extends ConsumerState<SimulatorScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildWarningHud(DroneState droneState) {
+    Color bg;
+    IconData icon;
+    String text;
+
+    if (droneState.inNoFlyZone) {
+      bg = Colors.red.shade900.withOpacity(0.9);
+      icon = Icons.dangerous;
+      text = 'ZONA PROIBIDA: ${droneState.currentNfzName ?? "ÁREA RESTRITA"}';
+    } else if (droneState.isGeofenceBreach) {
+      bg = Colors.red.shade800.withOpacity(0.85);
+      icon = Icons.shield;
+      text = 'LIMITE GEOFENCE (${droneState.activeMap.radiusMeters.toStringAsFixed(0)}m / ${droneState.activeMap.maxAltitudeMeters.toStringAsFixed(0)}m) ATINGIDO';
+    } else {
+      bg = Colors.amber.shade900.withOpacity(0.85);
+      icon = Icons.warning_amber;
+      text = 'ALERTA: APROXIMANDO DO PERÍMETRO (${droneState.distanceFromCenter.toStringAsFixed(0)}/${droneState.activeMap.radiusMeters.toStringAsFixed(0)}m)';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white38, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.4),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.white, size: 16),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                letterSpacing: 0.5,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPoiWidget(MapPoi poi) {
+    Color color;
+    IconData icon;
+    switch (poi.type) {
+      case PoiType.gate:
+        color = Colors.cyanAccent;
+        icon = Icons.flag;
+        break;
+      case PoiType.tower:
+        color = Colors.amberAccent;
+        icon = Icons.cell_tower;
+        break;
+      case PoiType.windsock:
+        color = Colors.greenAccent;
+        icon = Icons.air;
+        break;
+      case PoiType.landingPad:
+        color = Colors.blueAccent;
+        icon = Icons.flight_land;
+        break;
+      case PoiType.obstacle:
+        color = Colors.deepOrangeAccent;
+        icon = Icons.warning_amber;
+        break;
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.85),
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 1.5),
+          ),
+          child: Icon(icon, color: color, size: 12),
+        ),
+        if (poi.label != null)
+          Text(
+            poi.label!,
+            style: TextStyle(
+              color: color,
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              shadows: const [Shadow(color: Colors.black, blurRadius: 3)],
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _recenterMap(DroneState droneState) {
+    _mapController.move(
+      droneState.position,
+      droneState.activeMap.initialZoom,
+    );
+  }
+
+  void _showPresetMissionsDialog(
+      BuildContext context, FlightMap activeMap, SimulationNotifier notifier) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        if (activeMap.presetMissions.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Nenhuma rota pronta configurada para este mapa.',
+              style: TextStyle(color: Colors.white70),
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome, color: Colors.purpleAccent, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Rotas Prontas — ${activeMap.name}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...activeMap.presetMissions.map(
+                (mission) => ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.purple.withOpacity(0.2),
+                    child: const Icon(Icons.route, color: Colors.purpleAccent, size: 18),
+                  ),
+                  title: Text(
+                    mission.name,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '${mission.description} • ${mission.waypoints.length} waypoints',
+                    style: const TextStyle(color: Colors.white60, fontSize: 11),
+                  ),
+                  trailing: const Icon(Icons.play_circle_fill, color: Colors.greenAccent),
+                  onTap: () {
+                    Navigator.pop(context);
+                    notifier.loadPresetMission(mission);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
