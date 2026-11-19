@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 
@@ -184,6 +185,8 @@ class FpvCameraView extends StatefulWidget {
   final bool showGrid;
   final bool showGeofence;
   final bool showLandmarks;
+  final bool showGroundMap;
+  final bool transparentGround;
 
   const FpvCameraView({
     super.key,
@@ -200,6 +203,8 @@ class FpvCameraView extends StatefulWidget {
     this.showGrid = true,
     this.showGeofence = true,
     this.showLandmarks = true,
+    this.showGroundMap = true,
+    this.transparentGround = true,
   });
 
   @override
@@ -207,6 +212,8 @@ class FpvCameraView extends StatefulWidget {
 }
 
 class _FpvCameraViewState extends State<FpvCameraView> {
+  final MapController _groundMapController = MapController();
+
   @override
   void initState() {
     super.initState();
@@ -220,6 +227,9 @@ class _FpvCameraViewState extends State<FpvCameraView> {
       oldWidget.controller?.removeListener(_onControllerTick);
       widget.controller?.addListener(_onControllerTick);
     }
+    if (widget.controller == null && widget.showGroundMap) {
+      _updateGroundMapManual();
+    }
   }
 
   @override
@@ -229,7 +239,106 @@ class _FpvCameraViewState extends State<FpvCameraView> {
   }
 
   void _onControllerTick() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final ctrl = widget.controller;
+    if (ctrl != null && widget.showGroundMap) {
+      final activeMap = widget.flightMap ?? ctrl.physics.activeMap;
+      final latLng = FlightMap.metersToLatLng(ctrl.x, ctrl.y, activeMap.center);
+      final altitudeClamped = ctrl.z.clamp(0.0, 150.0);
+      final double groundZoom = (19.5 - (altitudeClamped / 120.0) * 3.0).clamp(15.0, 20.0);
+      try {
+        _groundMapController.move(latLng, groundZoom);
+      } catch (_) {}
+    }
+    setState(() {});
+  }
+
+  void _updateGroundMapManual() {
+    final activeMap = widget.flightMap ?? FlightMap.dronePark;
+    final latLng = FlightMap.metersToLatLng(widget.droneX, widget.droneY, activeMap.center);
+    final altitudeClamped = widget.droneZ.clamp(0.0, 150.0);
+    final double groundZoom = (19.5 - (altitudeClamped / 120.0) * 3.0).clamp(15.0, 20.0);
+    try {
+      _groundMapController.move(latLng, groundZoom);
+    } catch (_) {}
+  }
+
+  Widget _buildGroundMap({
+    required double curX,
+    required double curY,
+    required double curZ,
+    required double curYaw,
+    required double curPitch,
+    required double curRoll,
+    required double curGimbal,
+    required FlightMap activeMap,
+  }) {
+    final droneLatLng = FlightMap.metersToLatLng(curX, curY, activeMap.center);
+    final altitudeClamped = curZ.clamp(0.0, 150.0);
+    // Zoom escalado suavemente pela altitude z: ~19.5 a z=0m até ~16.5 a z=120m
+    final double groundZoom = (19.5 - (altitudeClamped / 120.0) * 3.0).clamp(15.0, 20.0);
+
+    final double yawRad = curYaw * pi / 180.0;
+    final double rollRad = curRoll * pi / 180.0;
+
+    // Inclinação combinada (Pitch dinâmico do drone + Gimbal Pitch)
+    // Gimbal varia entre 0.0° (horizonte) e -90.0° (Nadir)
+    final double totalPitchDeg = (curPitch + curGimbal).clamp(-90.0, 20.0);
+    // Nadir (-90°): nadirFactor = 0.0 -> tiltAngle = 0.0 (mapa plano visto de cima / top-down)
+    // Horizonte (0°): nadirFactor = 1.0 -> tiltAngle = -65° (terreno em perspectiva fugindo para o horizonte)
+    final double nadirFactor = ((totalPitchDeg + 90.0) / 90.0).clamp(0.0, 1.3);
+    const double maxTiltRad = 65.0 * pi / 180.0;
+    final double tiltAngle = -nadirFactor * maxTiltRad;
+
+    // Matriz de Perspectiva 3D
+    final perspectiveMatrix = Matrix4.identity()
+      ..setEntry(3, 2, 0.0025)
+      ..rotateZ(-rollRad)
+      ..rotateX(tiltAngle);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        // Tamanho expandido para garantir cobertura completa do solo sob forte inclinação e rotação
+        final mapDimension = max(w, h) * 2.2;
+
+        return IgnorePointer(
+          key: const Key('fpv_ground_map_layer'),
+          child: Center(
+            child: Transform(
+              transform: perspectiveMatrix,
+              alignment: Alignment.center,
+              child: Transform.rotate(
+                angle: -yawRad,
+                child: SizedBox(
+                  width: mapDimension,
+                  height: mapDimension,
+                  child: FlutterMap(
+                    key: const ValueKey('fpv_ground_flutter_map'),
+                    mapController: _groundMapController,
+                    options: MapOptions(
+                      initialCenter: droneLatLng,
+                      initialZoom: groundZoom,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.none,
+                      ),
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                        userAgentPackageName: 'com.dronesim.drone_simulator',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -250,21 +359,41 @@ class _FpvCameraViewState extends State<FpvCameraView> {
 
     return SizedBox.expand(
       child: ClipRect(
-        child: CustomPaint(
-          painter: FpvCameraPainter(
-            droneX: curX,
-            droneY: curY,
-            droneZ: curZ,
-            yaw: curYaw,
-            visualPitch: curPitch,
-            visualRoll: curRoll,
-            gimbalPitch: curGimbal,
-            flightMap: activeMap,
-            showOsd: widget.showOsd,
-            showGrid: widget.showGrid,
-            showGeofence: widget.showGeofence,
-            showLandmarks: widget.showLandmarks,
-          ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Camada de Projeção do Terreno Real (Satélite) em Perspectiva 3D
+            if (widget.showGroundMap)
+              _buildGroundMap(
+                curX: curX,
+                curY: curY,
+                curZ: curZ,
+                curYaw: curYaw,
+                curPitch: curPitch,
+                curRoll: curRoll,
+                curGimbal: curGimbal,
+                activeMap: activeMap,
+              ),
+
+            // Camada 3D vetorial (Céu, Grade, Pista, Heliponto H, Geofence, Marcos, OSD)
+            CustomPaint(
+              painter: FpvCameraPainter(
+                droneX: curX,
+                droneY: curY,
+                droneZ: curZ,
+                yaw: curYaw,
+                visualPitch: curPitch,
+                visualRoll: curRoll,
+                gimbalPitch: curGimbal,
+                flightMap: activeMap,
+                showOsd: widget.showOsd,
+                showGrid: widget.showGrid,
+                showGeofence: widget.showGeofence,
+                showLandmarks: widget.showLandmarks,
+                transparentGround: widget.transparentGround,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -285,6 +414,7 @@ class FpvCameraPainter extends CustomPainter {
   final bool showGrid;
   final bool showGeofence;
   final bool showLandmarks;
+  final bool transparentGround;
 
   FpvCameraPainter({
     required this.droneX,
@@ -299,6 +429,7 @@ class FpvCameraPainter extends CustomPainter {
     this.showGrid = true,
     this.showGeofence = true,
     this.showLandmarks = true,
+    this.transparentGround = true,
   });
 
   @override
@@ -376,18 +507,34 @@ class FpvCameraPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTRB(-diag, -diag, diag, 0), skyPaint);
 
     // Solo (abaixo de Y = 0)
-    final groundPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Color(0xFF263238), // Névoa distante no horizonte
-          Color(0xFF1B2E1E), // Campo verde escuro/terra
-          Color(0xFF111D13), // Terreno escuro em primeiro plano
-        ],
-        stops: [0.0, 0.2, 1.0],
-      ).createShader(Rect.fromLTRB(-diag, 0, diag, diag));
-    canvas.drawRect(Rect.fromLTRB(-diag, 0, diag, diag), groundPaint);
+    if (!transparentGround) {
+      final groundPaint = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF263238), // Névoa distante no horizonte
+            Color(0xFF1B2E1E), // Campo verde escuro/terra
+            Color(0xFF111D13), // Terreno escuro em primeiro plano
+          ],
+          stops: [0.0, 0.2, 1.0],
+        ).createShader(Rect.fromLTRB(-diag, 0, diag, diag));
+      canvas.drawRect(Rect.fromLTRB(-diag, 0, diag, diag), groundPaint);
+    } else {
+      // Solo translúcido com névoa atmosférica sutil no horizonte para fusão natural com os tiles de satélite
+      final groundHazePaint = Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0x6690CAF9), // Névoa azul ciano suave no horizonte
+            Color(0x221B2E1E), // Tonalização suave de profundidade
+            Colors.transparent,
+          ],
+          stops: [0.0, 0.15, 0.45],
+        ).createShader(Rect.fromLTRB(-diag, 0, diag, diag * 0.45));
+      canvas.drawRect(Rect.fromLTRB(-diag, 0, diag, diag * 0.45), groundHazePaint);
+    }
 
     // Linha fina luminosa do horizonte
     final horizonLinePaint = Paint()
@@ -875,6 +1022,7 @@ class FpvCameraPainter extends CustomPainter {
         oldDelegate.showOsd != showOsd ||
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showGeofence != showGeofence ||
-        oldDelegate.showLandmarks != showLandmarks;
+        oldDelegate.showLandmarks != showLandmarks ||
+        oldDelegate.transparentGround != transparentGround;
   }
 }
