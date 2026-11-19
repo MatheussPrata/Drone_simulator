@@ -82,7 +82,7 @@ class FlightMap {
     required this.center,
     required this.homePosition,
     this.radiusMeters = 500.0,
-    this.warningRadiusMeters = 400.0,
+    this.warningRadiusMeters = 450.0,
     this.maxAltitudeMeters = 120.0,
     this.initialZoom = 16.5,
     this.noFlyZones = const [],
@@ -135,7 +135,7 @@ class FlightMap {
     center: const LatLng(-23.0825, -52.4639),
     homePosition: const LatLng(-23.0825, -52.4639),
     radiusMeters: 500.0,
-    warningRadiusMeters: 400.0,
+    warningRadiusMeters: 450.0,
     maxAltitudeMeters: 120.0,
     initialZoom: 16.5,
   );
@@ -148,7 +148,7 @@ class FlightMap {
     center: const LatLng(-23.0760, -52.4550),
     homePosition: const LatLng(-23.0760, -52.4550),
     radiusMeters: 500.0,
-    warningRadiusMeters: 400.0,
+    warningRadiusMeters: 450.0,
     maxAltitudeMeters: 120.0,
     initialZoom: 16.5,
   );
@@ -161,7 +161,7 @@ class FlightMap {
     center: const LatLng(-23.0910, -52.4720),
     homePosition: const LatLng(-23.0910, -52.4720),
     radiusMeters: 500.0,
-    warningRadiusMeters: 400.0,
+    warningRadiusMeters: 450.0,
     maxAltitudeMeters: 120.0,
     initialZoom: 16.5,
   );
@@ -195,7 +195,7 @@ class FlightMap {
       center: center,
       homePosition: center,
       radiusMeters: 500.0,
-      warningRadiusMeters: 400.0,
+      warningRadiusMeters: 450.0,
       maxAltitudeMeters: 120.0,
       initialZoom: 16.5,
       noFlyZones: [

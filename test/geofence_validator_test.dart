@@ -77,7 +77,7 @@ void main() {
 
       // Acelera o drone para o Norte por tempo suficiente para alcançar e tentar ultrapassar os 500m
       engine.setManualInput(0.0, 0.0, 1.0, 0.0); // Pitch para frente (norte)
-      for (int i = 0; i < 1200; i++) {
+      for (int i = 0; i < 1500; i++) {
         engine.tick(0.05);
       }
 

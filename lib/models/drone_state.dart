@@ -12,6 +12,12 @@ class DroneState {
   final double altitude;
   final double speedKmh;
   final double verticalSpeedMs;
+
+  /// Componente leste da velocidade horizontal (m/s).
+  final double velocityEastMs;
+
+  /// Componente norte da velocidade horizontal (m/s).
+  final double velocityNorthMs;
   final double heading;
   final double pitch;
   final double roll;
@@ -40,6 +46,8 @@ class DroneState {
     this.altitude = 0.0,
     this.speedKmh = 0.0,
     this.verticalSpeedMs = 0.0,
+    this.velocityEastMs = 0.0,
+    this.velocityNorthMs = 0.0,
     this.heading = 0.0,
     this.pitch = 0.0,
     this.roll = 0.0,
@@ -69,6 +77,8 @@ class DroneState {
     double? altitude,
     double? speedKmh,
     double? verticalSpeedMs,
+    double? velocityEastMs,
+    double? velocityNorthMs,
     double? heading,
     double? pitch,
     double? roll,
@@ -97,6 +107,8 @@ class DroneState {
       altitude: altitude ?? this.altitude,
       speedKmh: speedKmh ?? this.speedKmh,
       verticalSpeedMs: verticalSpeedMs ?? this.verticalSpeedMs,
+      velocityEastMs: velocityEastMs ?? this.velocityEastMs,
+      velocityNorthMs: velocityNorthMs ?? this.velocityNorthMs,
       heading: heading ?? this.heading,
       pitch: pitch ?? this.pitch,
       roll: roll ?? this.roll,

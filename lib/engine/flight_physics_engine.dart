@@ -25,6 +25,21 @@ class FlightPhysicsEngine {
   double _visualPitch = 0.0;
   double _visualRoll = 0.0;
   double _gimbalPitch = 0.0;
+
+  /// Aceleração da gravidade (m/s²).
+  static const double gravity = 9.81;
+
+  /// Ângulo de inclinação real (atitudo) aplicado ao modelo de forças.
+  double _attitudePitch = 0.0;
+  double _attitudeRoll = 0.0;
+
+  /// Altitude que o piloto automático tenta manter no ponto neutro do throttle.
+  double _hoverAnchorAltitude = 0.0;
+  double _hoverPhase = 0.0;
+
+  /// Velocidade informada por modos automáticos (RTH/pouso). -1 = calcular.
+  double _externalSpeedKmh = -1.0;
+
   final Random _random = Random();
 
   Function(DroneState)? onStateChanged;
@@ -34,6 +49,39 @@ class FlightPhysicsEngine {
   double get visualPitch => _visualPitch;
   double get visualRoll => _visualRoll;
   double get gimbalPitch => _gimbalPitch;
+
+  /// Deslocamento em metros a leste do ponto Home.
+  double get eastMeters => GeoMath.offsetToMeters(_state.position, _state.homePosition).$1;
+
+  /// Deslocamento em metros ao norte do ponto Home.
+  double get northMeters => GeoMath.offsetToMeters(_state.position, _state.homePosition).$2;
+
+  /// Sincroniza a cinemática da engine com um modo automático controlado
+  /// externamente (decolagem, RTH, pouso), mantendo HUD, minimapa e cena 3D
+  /// exatamente na mesma coordenada.
+  void syncExternal({
+    required double east,
+    required double north,
+    required double altitude,
+    required double heading,
+    double? speedKmh,
+  }) {
+    final position = GeoMath.offsetByMeters(_state.homePosition, east, north);
+    _velocityX = 0.0;
+    _velocityY = 0.0;
+    _verticalVelocity = 0.0;
+    _hoverAnchorAltitude = altitude;
+    _externalSpeedKmh = speedKmh ?? -1.0;
+    _state = _state.copyWith(
+      position: position,
+      altitude: altitude,
+      heading: (heading % 360.0 + 360.0) % 360.0,
+      speedKmh: speedKmh ?? 0.0,
+      verticalSpeedMs: 0.0,
+      velocityEastMs: 0.0,
+      velocityNorthMs: 0.0,
+    );
+  }
 
   FlightPhysicsEngine({FlightMap? initialMap})
       : _activeMap = initialMap ?? FlightMap.dronePark,
@@ -170,9 +218,15 @@ class FlightPhysicsEngine {
     final bool isNfWarning = validation.isNoFlyWarning;
     final String? nfzName = validation.currentNfzName;
 
-    // ── Speed calculation ──
+    // ── Speed calculation (magnitude 3D real, em km/h) ──
     final horizontalSpeed = sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
-    final speedKmh = horizontalSpeed * 3.6;
+    double speedKmh = sqrt(horizontalSpeed * horizontalSpeed +
+            _verticalVelocity * _verticalVelocity) *
+        3.6;
+    if (_externalSpeedKmh >= 0) {
+      speedKmh = _externalSpeedKmh;
+    }
+    _externalSpeedKmh = -1.0;
 
     // ── Battery drain ──
     if (_verticalVelocity > 0) {
@@ -182,27 +236,32 @@ class FlightPhysicsEngine {
     newBattery = (newBattery - baseDrain).clamp(0.0, 100.0);
     final newVoltage = 9.9 + (newBattery / 100.0) * 2.7;
 
-    // ── Visual pitch/roll com interpolação suave (lerp) e auto-nivelamento ──
-    double targetPitch = (_manualPitch * -25.0).clamp(-30.0, 30.0);
-    double targetRoll = (_manualRoll * 25.0).clamp(-30.0, 30.0);
+    // ── Visual pitch/roll: nos modos manuais reflete a atitude real do
+    // modelo de forças; nos modos automáticos segue o perfil de voo ──
+    double targetPitch;
+    double targetRoll;
 
     if (_state.flightMode == FlightMode.autoMission ||
         _state.flightMode == FlightMode.rtl) {
-      targetPitch = (-(horizontalSpeed / (profile.maxSpeedKmh / 3.6)) * 15.0).clamp(-25.0, 25.0);
+      targetPitch =
+          (-(horizontalSpeed / (profile.maxSpeedKmh / 3.6)) * 15.0).clamp(-25.0, 25.0);
       targetRoll = 0.0;
     } else if (_state.flightMode == FlightMode.landing) {
       targetPitch = 0.0;
       targetRoll = 0.0;
+    } else {
+      targetPitch = _attitudePitch;
+      targetRoll = _attitudeRoll;
     }
 
     final double lerpFactor = (dt * 10.0).clamp(0.0, 1.0);
     _visualPitch += (targetPitch - _visualPitch) * lerpFactor;
     _visualRoll += (targetRoll - _visualRoll) * lerpFactor;
 
-    if (_manualPitch == 0.0 && _visualPitch.abs() < 0.01) {
+    if (_manualPitch == 0.0 && _visualPitch.abs() < 0.05) {
       _visualPitch = 0.0;
     }
-    if (_manualRoll == 0.0 && _visualRoll.abs() < 0.01) {
+    if (_manualRoll == 0.0 && _visualRoll.abs() < 0.05) {
       _visualRoll = 0.0;
     }
 
@@ -231,6 +290,8 @@ class FlightPhysicsEngine {
       altitude: newAltitude,
       speedKmh: speedKmh,
       verticalSpeedMs: _verticalVelocity,
+      velocityEastMs: _velocityX,
+      velocityNorthMs: _velocityY,
       heading: _state.heading,
       pitch: _visualPitch,
       roll: _visualRoll,
@@ -253,55 +314,113 @@ class FlightPhysicsEngine {
 
   void _processManualFlight(
       double dt, DroneProfile profile, double windForceX, double windForceY) {
-    // Heading rotation (yaw)
+    // ── Yaw ──
     const double yawRate = 120.0; // deg/sec
     double newHeading = (_state.heading + _manualYaw * yawRate * dt) % 360.0;
     if (newHeading < 0) newHeading += 360.0;
 
-    // Vertical velocity (throttle)
-    if (_manualThrottle.abs() > 0.05) {
-      _verticalVelocity = _manualThrottle > 0
-          ? _manualThrottle * profile.maxAscentMs
-          : _manualThrottle * profile.maxDescentMs;
+    // ── Atitude alvo (pitch/roll até ±30°) com suavização (lerp) ──
+    final double targetPitch = (_manualPitch * -30.0).clamp(-30.0, 30.0);
+    final double targetRoll = (_manualRoll * 30.0).clamp(-30.0, 30.0);
+    final double attitudeLerp = (dt * 8.0).clamp(0.0, 1.0);
+    _attitudePitch += (targetPitch - _attitudePitch) * attitudeLerp;
+    _attitudeRoll += (targetRoll - _attitudeRoll) * attitudeLerp;
+
+    // Auto-nivelamento: sem entrada manual, a atitude volta a zero.
+    if (!_hasManualTiltInput) {
+      if (_attitudePitch.abs() < 0.05) _attitudePitch = 0.0;
+      if (_attitudeRoll.abs() < 0.05) _attitudeRoll = 0.0;
+    }
+
+    // ── Eixo vertical: empuxo x gravidade ──
+    if (_manualThrottle.abs() <= 0.06) {
+      // Ponto neutro do stick = hover: a sustentação compensa a gravidade,
+      // com micro-oscilação senoidal de ±0.05 m para parecer vivo no ar.
+      _hoverPhase += dt;
+      final double targetAltitude =
+          _hoverAnchorAltitude + sin(_hoverPhase * 2.1) * 0.05;
+      final double error = targetAltitude - _state.altitude;
+      final double hoverAccel =
+          (error * 2.6 - _verticalVelocity * 1.9).clamp(-4.0, 4.0);
+      _verticalVelocity += hoverAccel * dt;
     } else {
-      _verticalVelocity *= 0.9; // hover damping
-      if (_verticalVelocity.abs() < 0.05) _verticalVelocity = 0.0;
+      // Empuxo além do necessário para vencer a gravidade: a subida ganha
+      // inércia e, ao soltar o stick, o arrasto freia a descida/subida.
+      _hoverAnchorAltitude = _state.altitude;
+      final double thrustAccel = _manualThrottle > 0
+          ? _manualThrottle * profile.maxAscentMs * 1.6
+          : _manualThrottle * profile.maxDescentMs * 1.6;
+      _verticalVelocity += thrustAccel * dt;
     }
 
-    // Pitch & roll translate to local forward/backward & strafe
-    final headingRad = newHeading * pi / 180.0;
-    final forwardX = sin(headingRad);
-    final forwardY = cos(headingRad);
-    final rightX = cos(headingRad);
-    final rightY = -sin(headingRad);
+    // Arrasto vertical proporcional à velocidade.
+    _verticalVelocity -=
+        _verticalVelocity * _verticalVelocity.abs() * 0.02 * dt;
+    _verticalVelocity = _verticalVelocity.clamp(
+      -profile.maxDescentMs,
+      profile.maxAscentMs,
+    );
 
-    final inputAccelX =
-        (forwardX * _manualPitch + rightX * _manualRoll) * profile.accelerationMs2;
-    final inputAccelY =
-        (forwardY * _manualPitch + rightY * _manualRoll) * profile.accelerationMs2;
+    // ── Eixo horizontal: projeção da inclinação (quanto mais inclinado,
+    // mais rápido acelera) ──
+    final double pitchRad = _attitudePitch * pi / 180.0;
+    final double rollRad = _attitudeRoll * pi / 180.0;
 
-    _velocityX += inputAccelX * dt;
-    _velocityY += inputAccelY * dt;
+    // Pitch negativo (nariz para baixo) gera aceleração para frente.
+    final double accelForward = -tan(pitchRad) * gravity;
+    final double accelRight = tan(rollRad) * gravity;
 
-    // Aerodynamic drag
-    if (_manualPitch.abs() < 0.05 && _manualRoll.abs() < 0.05) {
-      _velocityX *= 0.92;
-      _velocityY *= 0.92;
-      if (_velocityX.abs() < 0.05) _velocityX = 0.0;
-      if (_velocityY.abs() < 0.05) _velocityY = 0.0;
+    final double headingRad = newHeading * pi / 180.0;
+    final double forwardX = sin(headingRad);
+    final double forwardY = cos(headingRad);
+    final double rightX = cos(headingRad);
+    final double rightY = -sin(headingRad);
+
+    _velocityX += (forwardX * accelForward + rightX * accelRight) * dt;
+    _velocityY += (forwardY * accelForward + rightY * accelRight) * dt;
+
+    // ── Arrasto aerodinâmico (quadrático + linear): ao soltar o stick o
+    // drone desliza, inclinando levemente para frear, até parar ──
+    final double horizontalSpeed =
+        sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
+    if (horizontalSpeed > 0.0001) {
+      final double dragAccel =
+          0.55 * horizontalSpeed + 0.012 * horizontalSpeed * horizontalSpeed;
+      final double scale =
+          (1.0 - (dragAccel * dt) / horizontalSpeed).clamp(0.0, 1.0);
+      _velocityX *= scale;
+      _velocityY *= scale;
+      if (!_hasManualTiltInput && horizontalSpeed < 0.08) {
+        _velocityX = 0.0;
+        _velocityY = 0.0;
+      }
     }
 
-    // Clamp horizontal speed to profile max
-    final maxSpeedMs = profile.maxSpeedKmh / 3.6;
-    final currentSpeed = sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
+    // ── Turbulência leve acima de 1 m de altitude ──
+    if (_state.altitude > 1.0) {
+      _velocityX += (_random.nextDouble() * 2.0 - 1.0) * 0.12 * dt;
+      _velocityY += (_random.nextDouble() * 2.0 - 1.0) * 0.12 * dt;
+    }
+
+    // ── Influência do vento configurado ──
+    _velocityX += windForceX * 0.05 * dt;
+    _velocityY += windForceY * 0.05 * dt;
+
+    // ── Clamp horizontal no máximo do perfil ──
+    final double maxSpeedMs = profile.maxSpeedKmh / 3.6;
+    final double currentSpeed =
+        sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
     if (currentSpeed > maxSpeedMs) {
-      final scale = maxSpeedMs / currentSpeed;
+      final double scale = maxSpeedMs / currentSpeed;
       _velocityX *= scale;
       _velocityY *= scale;
     }
 
     _state = _state.copyWith(heading: newHeading);
   }
+
+  bool get _hasManualTiltInput =>
+      _manualPitch.abs() > 0.05 || _manualRoll.abs() > 0.05;
 
   void _processAutoMission(
       double dt, DroneProfile profile, double windForceX, double windForceY) {
@@ -480,6 +599,10 @@ class FlightPhysicsEngine {
       _verticalVelocity = 0.0;
       _velocityX = 0.0;
       _velocityY = 0.0;
+      _attitudePitch = 0.0;
+      _attitudeRoll = 0.0;
+      _hoverAnchorAltitude = 2.0;
+      _hoverPhase = 0.0;
     }
   }
 

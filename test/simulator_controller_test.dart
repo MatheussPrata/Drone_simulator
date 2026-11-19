@@ -28,7 +28,7 @@ void main() {
       }
 
       // Deve atingir z = 10m e estabilizar em hovering
-      expect(controller.z, 10.0);
+      expect(controller.z, closeTo(10.0, 0.1));
       expect(controller.status, SimulatorStatus.hovering);
       expect(controller.isHovering, true);
     });
@@ -42,7 +42,7 @@ void main() {
         controller.update(0.016);
       }
       expect(controller.status, SimulatorStatus.hovering);
-      expect(controller.z, 10.0);
+      expect(controller.z, closeTo(10.0, 0.1));
 
       // 2. Simula deslocamento para (30m, 40m) = 50m do centro
       controller.setPosition(30.0, 40.0);

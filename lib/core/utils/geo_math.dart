@@ -39,6 +39,14 @@ class GeoMath {
     );
   }
 
-  static double _toRad(double deg) => deg * pi / 180.0;
-  static double _toDeg(double rad) => rad * 180.0 / pi;
+  /// Converte a diferença entre dois pontos em metros Leste (x) e Norte (y).
+  static (double, double) offsetToMeters(LatLng origin, LatLng offset) {
+    final dLat = _toRad(offset.latitude - origin.latitude);
+    final dLon = _toRad(offset.longitude - origin.longitude);
+    final north = dLat * _earthRadius;
+    final east = dLon * _earthRadius * cos(_toRad(origin.latitude));
+    return (east, north);
+  }
+
+  static double _toRad(double deg) => deg * pi / 180.0;  static double _toDeg(double rad) => rad * 180.0 / pi;
 }

@@ -41,7 +41,7 @@ class GeofenceValidationResult {
 /// e monitora a proximidade/entrada em Zonas Proibidas de Voo (No-Fly Zones).
 class GeofenceValidator {
   static const double defaultMaxRadiusMeters = 500.0;
-  static const double defaultWarningRadiusMeters = 400.0;
+  static const double defaultWarningRadiusMeters = 450.0;
 
   /// Validação pura em coordenadas cartesianas (x, y) em metros relativas a (0, 0).
   ///
@@ -164,10 +164,8 @@ class GeofenceValidator {
       origin: map.center,
     );
 
-    // Considera também aviso de teto de altitude se aplicável
-    final bool altitudeWarning = altitude >= (map.maxAltitudeMeters - 15.0);
-    final bool combinedWarning = result.isGeofenceWarning || altitudeWarning;
-
+    // Aviso de geofence exclusivamente por proximidade da borda (>= 450 m).
+    // O teto de altitude é tratado como breach separado, nunca como geofence.
     return GeofenceValidationResult(
       position: result.position,
       x: result.x,
@@ -175,7 +173,7 @@ class GeofenceValidator {
       distanceFromCenter: result.distanceFromCenter,
       velocityX: result.velocityX,
       velocityY: result.velocityY,
-      isGeofenceWarning: combinedWarning,
+      isGeofenceWarning: result.isGeofenceWarning,
       isGeofenceBreach: result.isGeofenceBreach,
       inNoFlyZone: result.inNoFlyZone,
       isNoFlyWarning: result.isNoFlyWarning,

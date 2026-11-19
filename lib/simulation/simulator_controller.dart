@@ -185,6 +185,7 @@ class SimulatorController extends ChangeNotifier {
     _isMapPrimaryView = false;
     physics.resetBattery();
     physics.selectMap(physics.activeMap);
+    _syncPhysicsFromController();
     notifyListeners();
   }
 
@@ -214,12 +215,14 @@ class SimulatorController extends ChangeNotifier {
     _x = newX;
     _y = newY;
     if (newZ != null) _z = newZ;
+    _syncPhysicsFromController();
     notifyListeners();
   }
 
   /// Define a orientação yaw em graus [0, 360)
   void setYaw(double newYaw) {
     _yaw = (newYaw % 360.0 + 360.0) % 360.0;
+    _syncPhysicsFromController();
     notifyListeners();
   }
 
@@ -267,33 +270,14 @@ class SimulatorController extends ChangeNotifier {
           _z = targetTakeoffAltitude;
           _status = SimulatorStatus.hovering; // Estabiliza em 10m
         }
+        _syncPhysicsFromController(speedKmh: climbSpeed * 3.6);
         break;
 
       case SimulatorStatus.hovering:
       case SimulatorStatus.flying:
-        if (_manualThrottle.abs() > 0.05) {
-          _z = (_z + _manualThrottle * climbSpeed * dt).clamp(0.0, 120.0);
-        }
-        if (_manualYaw.abs() > 0.05) {
-          _yaw = (_yaw + _manualYaw * 90.0 * dt) % 360.0;
-        }
-        if (_manualPitch.abs() > 0.05 || _manualRoll.abs() > 0.05) {
-          final rad = _yaw * pi / 180.0;
-          const speed = 12.0;
-          final dx = (sin(rad) * _manualPitch + cos(rad) * _manualRoll) * speed;
-          final dy = (cos(rad) * _manualPitch - sin(rad) * _manualRoll) * speed;
-          _x += dx * dt;
-          _y += dy * dt;
-
-          final val = GeofenceValidator.validateCartesian(
-            x: _x,
-            y: _y,
-            noFlyZones: physics.activeMap.noFlyZones,
-            origin: physics.activeMap.center,
-          );
-          _x = val.x;
-          _y = val.y;
-        }
+        // A cinemática manual é integrada pela engine física (empuxo,
+        // gravidade, inclinação, arrasto e turbulência). Aqui apenas
+        // contabilizamos o consumo da bateria.
         _battery = max(0.0, _battery - 0.02 * dt);
         break;
 
@@ -313,6 +297,7 @@ class SimulatorController extends ChangeNotifier {
           _x += ux * step;
           _y += uy * step;
         }
+        _syncPhysicsFromController(speedKmh: rthSpeed * 3.6);
         break;
 
       case SimulatorStatus.landing:
@@ -323,18 +308,42 @@ class SimulatorController extends ChangeNotifier {
           _status = SimulatorStatus.landed;
           _isArmed = false;
         }
+        _syncPhysicsFromController(speedKmh: descentSpeed * 3.6);
         break;
 
       case SimulatorStatus.disarmed:
       case SimulatorStatus.landed:
         _z = 0.0;
+        _syncPhysicsFromController();
         break;
     }
 
     // 3. Atualiza o motor de física com dt fixo
     physics.update(dt);
 
-    // 4. Notifica observers/widgets
+    // 4. Espelha a cinemática integrada pela física (inércia/arrasto) para
+    // HUD, minimapa e cena 3D usarem exatamente a mesma coordenada.
+    if (_status == SimulatorStatus.hovering ||
+        _status == SimulatorStatus.flying) {
+      _x = physics.eastMeters;
+      _y = physics.northMeters;
+      _z = physics.state.altitude;
+      _yaw = physics.state.heading;
+    }
+
+    // 5. Notifica observers/widgets
     notifyListeners();
+  }
+
+  /// Mantém a engine física sincronizada com os modos automáticos
+  /// (decolagem, RTH e pouso).
+  void _syncPhysicsFromController({double? speedKmh}) {
+    physics.syncExternal(
+      east: _x,
+      north: _y,
+      altitude: _z,
+      heading: _yaw,
+      speedKmh: speedKmh,
+    );
   }
 }

@@ -9,7 +9,7 @@ void main() {
     test('Drone Park default map has optimal 500m radius and 120m altitude ceiling', () {
       final map = FlightMap.dronePark;
       expect(map.radiusMeters, 500.0);
-      expect(map.warningRadiusMeters, 400.0);
+      expect(map.warningRadiusMeters, 450.0);
       expect(map.maxAltitudeMeters, 120.0);
       expect(map.pois.isNotEmpty, true);
       expect(map.noFlyZones.isNotEmpty, true);
