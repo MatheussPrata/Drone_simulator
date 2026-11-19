@@ -678,9 +678,12 @@
       buildDroneModel();
 
       // ── Câmera Dinâmica (FPV vs 3ª Pessoa / Chase Cam) ──
-      var chaseCamPos = new THREE.Vector3(0, 1.8, 4.5);
-      var chaseCamLook = new THREE.Vector3(0, 0.5, 0);
-      var hasSnapped = false;
+      // ── Estado da câmera: transição FPV ↔ 3ª pessoa ──
+      var cameraTransition = 0.0;          // 0 = FPV, 1 = 3ª pessoa
+      var cameraTransitionSpeed = 1.0 / 0.45; // leva ~0.45s
+      var chaseSpringPos = new THREE.Vector3(0, 2.2, 5.5);
+      var chaseSpringLook = new THREE.Vector3(0, 0.5, 0);
+      var chaseInitialized = false;
 
       // ── API Exposta para o Flutter ──
       window.updateDroneState = function (jsonState) {
@@ -729,7 +732,9 @@
       }
 
       // ── Atualização da Câmera por Frame ──
-      function updateCameraFrame() {
+      function updateCameraFrame(dt) {
+        dt = Math.max(0.001, Math.min(dt || 0.016, 0.1));
+
         var droneX = droneState.x;
         var droneY = droneState.z;
         var droneZ = -droneState.y;
@@ -738,48 +743,71 @@
         var pitchRad = (droneState.visualPitch + droneState.gimbalPitch) * Math.PI / 180.0;
         var rollRad = -(droneState.visualRoll * Math.PI / 180.0);
 
-        if (droneState.cameraMode === 'thirdPerson') {
-          // Modo 3ª Pessoa: droneGroup visível
-          droneGroup.visible = true;
-
-          // Câmera 4.5m atrás e 1.8m acima do drone
-          var dist = 4.5;
-          var height = 1.8;
-          var targetCamX = droneX + Math.sin(yawRad) * dist;
-          var targetCamY = Math.max(0.4, droneY + height);
-          var targetCamZ = droneZ + Math.cos(yawRad) * dist;
-
-          // Ponto de foco: ligeiramente à frente do drone e no horizonte
-          var lookDist = 2.0;
-          var targetLookX = droneX - Math.sin(yawRad) * lookDist;
-          var targetLookY = droneY + 0.5;
-          var targetLookZ = droneZ - Math.cos(yawRad) * lookDist;
-
-          var targetCamVec = new THREE.Vector3(targetCamX, targetCamY, targetCamZ);
-          var targetLookVec = new THREE.Vector3(targetLookX, targetLookY, targetLookZ);
-
-          if (!hasSnapped) {
-            chaseCamPos.copy(targetCamVec);
-            chaseCamLook.copy(targetLookVec);
-            hasSnapped = true;
-          } else {
-            // Interpolação suave lerp para sensação cinematográfica de perseguição
-            chaseCamPos.lerp(targetCamVec, 0.10);
-            chaseCamLook.lerp(targetLookVec, 0.12);
-          }
-
-          camera.position.copy(chaseCamPos);
-          camera.lookAt(chaseCamLook);
-        } else {
-          // Modo 1ª Pessoa (FPV): ocultar a malha do próprio drone
-          droneGroup.visible = false;
-          hasSnapped = false;
-
-          // Câmera posicionada na lente no nariz do drone
-          camera.position.set(droneX, Math.max(0.18, droneY + 0.12), droneZ);
-          // Rotação com Yaw, Roll e GimbalPitch (0° no horizonte até -90° no Nadir)
-          camera.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
+        // Transição interpolada (sem teleporte) entre os dois modos.
+        var target = droneState.cameraMode === 'thirdPerson' ? 1.0 : 0.0;
+        var step = cameraTransitionSpeed * dt;
+        if (cameraTransition < target) {
+          cameraTransition = Math.min(target, cameraTransition + step);
+        } else if (cameraTransition > target) {
+          cameraTransition = Math.max(target, cameraTransition - step);
         }
+        // smoothstep para entrada/saída suaves
+        var blend = cameraTransition * cameraTransition * (3.0 - 2.0 * cameraTransition);
+
+        // ── Pose 1ª pessoa: lente no nariz do drone ──
+        var fpvPosX = droneX;
+        var fpvPosY = Math.max(0.18, droneY + 0.12);
+        var fpvPosZ = droneZ;
+
+        var cosPitch = Math.cos(pitchRad);
+        var fpvLookX = droneX - Math.sin(yawRad) * cosPitch * 10.0;
+        var fpvLookY = droneY + Math.sin(pitchRad) * 10.0;
+        var fpvLookZ = droneZ - Math.cos(yawRad) * cosPitch * 10.0;
+
+        // ── Pose 3ª pessoa: spring-damper com amortecimento por eixo ──
+        var targetCamX = droneX + Math.sin(yawRad) * 5.5;
+        var targetCamY = Math.max(0.4, droneY + 2.2);
+        var targetCamZ = droneZ + Math.cos(yawRad) * 5.5;
+
+        var targetLookX = droneX - Math.sin(yawRad) * 2.0;
+        var targetLookY = droneY + 0.5;
+        var targetLookZ = droneZ - Math.cos(yawRad) * 2.0;
+
+        if (!chaseInitialized) {
+          chaseSpringPos.set(targetCamX, targetCamY, targetCamZ);
+          chaseSpringLook.set(targetLookX, targetLookY, targetLookZ);
+          chaseInitialized = true;
+        } else {
+          // Mais elástico no plano horizontal (curvas de yaw) e firme na vertical.
+          var kXZ = 1.0 - Math.exp(-3.2 * dt);
+          var kY = 1.0 - Math.exp(-8.0 * dt);
+          chaseSpringPos.x += (targetCamX - chaseSpringPos.x) * kXZ;
+          chaseSpringPos.z += (targetCamZ - chaseSpringPos.z) * kXZ;
+          chaseSpringPos.y += (targetCamY - chaseSpringPos.y) * kY;
+
+          var kLook = 1.0 - Math.exp(-6.0 * dt);
+          chaseSpringLook.x += (targetLookX - chaseSpringLook.x) * kLook;
+          chaseSpringLook.y += (targetLookY - chaseSpringLook.y) * kLook;
+          chaseSpringLook.z += (targetLookZ - chaseSpringLook.z) * kLook;
+        }
+
+        // ── Mistura final entre FPV e 3ª pessoa ──
+        camera.position.set(
+          fpvPosX + (chaseSpringPos.x - fpvPosX) * blend,
+          fpvPosY + (chaseSpringPos.y - fpvPosY) * blend,
+          fpvPosZ + (chaseSpringPos.z - fpvPosZ) * blend
+        );
+
+        var lookX = fpvLookX + (chaseSpringLook.x - fpvLookX) * blend;
+        var lookY = fpvLookY + (chaseSpringLook.y - fpvLookY) * blend;
+        var lookZ = fpvLookZ + (chaseSpringLook.z - fpvLookZ) * blend;
+        camera.lookAt(lookX, lookY, lookZ);
+
+        // Horizonte inclina apenas de leve na 3ª pessoa (roll * 0.25).
+        camera.rotateZ(rollRad * 0.25 * blend);
+
+        // Drone visível durante a transição e no modo perseguição.
+        droneGroup.visible = cameraTransition > 0.02;
 
         // Vibração de câmera em impactos (decaimento vem da física em Dart)
         if (droneState.impactShake > 0.001) {
@@ -787,13 +815,19 @@
           camera.position.x += (Math.random() * 2 - 1) * 0.18 * shake;
           camera.position.y += (Math.random() * 2 - 1) * 0.14 * shake;
           camera.position.z += (Math.random() * 2 - 1) * 0.18 * shake;
-          camera.rotation.z += (Math.random() * 2 - 1) * 0.02 * shake;
+          camera.rotateZ((Math.random() * 2 - 1) * 0.02 * shake);
         }
       }
 
       // ── Loop de Renderização e Animação ──
+      var lastFrameTime = performance.now();
+
       function animate() {
         requestAnimationFrame(animate);
+
+        var now = performance.now();
+        var frameDt = (now - lastFrameTime) / 1000.0;
+        lastFrameTime = now;
 
         // Animação contínua das hélices quando o drone está ativo
         var isSpinning = droneState.flying ||
@@ -811,7 +845,7 @@
           }
         }
 
-        updateCameraFrame();
+        updateCameraFrame(frameDt);
         renderer.render(scene, camera);
       }
       animate();

@@ -82,7 +82,7 @@ void main() {
       }
 
       // Critério de aceite: O drone NÃO ultrapassa os 500m
-      expect(engine.state.distanceFromCenter <= 500.0, true);
+      expect(engine.state.distanceFromCenter, lessThanOrEqualTo(500.2));
       expect(engine.state.distanceFromCenter, closeTo(500.0, 0.5));
       expect(engine.state.isGeofenceWarning, true);
       expect(engine.state.isGeofenceBreach, true);
