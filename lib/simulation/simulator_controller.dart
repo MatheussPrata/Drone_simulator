@@ -51,6 +51,9 @@ class SimulatorController extends ChangeNotifier {
   double get z => _z;
   double get yaw => _yaw;
   double get battery => _battery;
+  double get gimbalPitch => physics.gimbalPitch;
+  double get visualPitch => physics.visualPitch;
+  double get visualRoll => physics.visualRoll;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
   bool get isHovering => _status == SimulatorStatus.hovering;
@@ -156,6 +159,18 @@ class SimulatorController extends ChangeNotifier {
   void setBattery(double percent) {
     _battery = percent.clamp(0.0, 100.0);
     _checkBatteryFailSafe();
+    notifyListeners();
+  }
+
+  /// Define a inclinação da câmera gimbal [0° a -90°]
+  void setGimbalPitch(double degrees) {
+    physics.setGimbalPitch(degrees);
+    notifyListeners();
+  }
+
+  /// Ajusta incrementalmente o pitch da câmera gimbal
+  void adjustGimbalPitch(double deltaDegrees) {
+    physics.adjustGimbalPitch(deltaDegrees);
     notifyListeners();
   }
 

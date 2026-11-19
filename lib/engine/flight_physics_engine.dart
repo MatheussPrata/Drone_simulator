@@ -22,12 +22,18 @@ class FlightPhysicsEngine {
   double _velocityX = 0.0; // m/s East-West
   double _velocityY = 0.0; // m/s North-South
   double _verticalVelocity = 0.0; // m/s Up-Down
+  double _visualPitch = 0.0;
+  double _visualRoll = 0.0;
+  double _gimbalPitch = 0.0;
   final Random _random = Random();
 
   Function(DroneState)? onStateChanged;
 
   DroneState get state => _state;
   FlightMap get activeMap => _activeMap;
+  double get visualPitch => _visualPitch;
+  double get visualRoll => _visualRoll;
+  double get gimbalPitch => _gimbalPitch;
 
   FlightPhysicsEngine({FlightMap? initialMap})
       : _activeMap = initialMap ?? FlightMap.dronePark,
@@ -70,6 +76,25 @@ class FlightPhysicsEngine {
     final profile = _state.activeProfile;
 
     if (_state.flightMode == FlightMode.disarmed) {
+      // Interpolação suave (lerp) e auto-nivelamento para visualPitch e visualRoll mesmo em solo/bancada
+      final double targetPitch = (_manualPitch * -25.0).clamp(-30.0, 30.0);
+      final double targetRoll = (_manualRoll * 25.0).clamp(-30.0, 30.0);
+      final double lerpFactor = (dt * 10.0).clamp(0.0, 1.0);
+      _visualPitch += (targetPitch - _visualPitch) * lerpFactor;
+      _visualRoll += (targetRoll - _visualRoll) * lerpFactor;
+      if (_manualPitch == 0.0 && _visualPitch.abs() < 0.01) {
+        _visualPitch = 0.0;
+      }
+      if (_manualRoll == 0.0 && _visualRoll.abs() < 0.01) {
+        _visualRoll = 0.0;
+      }
+      _state = _state.copyWith(
+        pitch: _visualPitch,
+        roll: _visualRoll,
+        visualPitch: _visualPitch,
+        visualRoll: _visualRoll,
+        gimbalPitch: _gimbalPitch,
+      );
       onStateChanged?.call(_state);
       return;
     }
@@ -157,14 +182,28 @@ class FlightPhysicsEngine {
     newBattery = (newBattery - baseDrain).clamp(0.0, 100.0);
     final newVoltage = 9.9 + (newBattery / 100.0) * 2.7;
 
-    // ── Visual pitch/roll ──
-    double visualPitch = (_manualPitch * -25.0).clamp(-30.0, 30.0);
-    double visualRoll = (_manualRoll * 25.0).clamp(-30.0, 30.0);
+    // ── Visual pitch/roll com interpolação suave (lerp) e auto-nivelamento ──
+    double targetPitch = (_manualPitch * -25.0).clamp(-30.0, 30.0);
+    double targetRoll = (_manualRoll * 25.0).clamp(-30.0, 30.0);
 
     if (_state.flightMode == FlightMode.autoMission ||
         _state.flightMode == FlightMode.rtl) {
-      visualPitch = (-(horizontalSpeed / (profile.maxSpeedKmh / 3.6)) * 15.0).clamp(-25.0, 25.0);
-      visualRoll = 0.0;
+      targetPitch = (-(horizontalSpeed / (profile.maxSpeedKmh / 3.6)) * 15.0).clamp(-25.0, 25.0);
+      targetRoll = 0.0;
+    } else if (_state.flightMode == FlightMode.landing) {
+      targetPitch = 0.0;
+      targetRoll = 0.0;
+    }
+
+    final double lerpFactor = (dt * 10.0).clamp(0.0, 1.0);
+    _visualPitch += (targetPitch - _visualPitch) * lerpFactor;
+    _visualRoll += (targetRoll - _visualRoll) * lerpFactor;
+
+    if (_manualPitch == 0.0 && _visualPitch.abs() < 0.01) {
+      _visualPitch = 0.0;
+    }
+    if (_manualRoll == 0.0 && _visualRoll.abs() < 0.01) {
+      _visualRoll = 0.0;
     }
 
     // ── Fail-safe: RTL at 15% battery ──
@@ -183,6 +222,8 @@ class FlightPhysicsEngine {
       _velocityY = 0.0;
       _verticalVelocity = 0.0;
       newMode = FlightMode.disarmed;
+      _visualPitch = 0.0;
+      _visualRoll = 0.0;
     }
 
     _state = _state.copyWith(
@@ -191,8 +232,11 @@ class FlightPhysicsEngine {
       speedKmh: speedKmh,
       verticalSpeedMs: _verticalVelocity,
       heading: _state.heading,
-      pitch: visualPitch,
-      roll: visualRoll,
+      pitch: _visualPitch,
+      roll: _visualRoll,
+      visualPitch: _visualPitch,
+      visualRoll: _visualRoll,
+      gimbalPitch: _gimbalPitch,
       batteryPercent: newBattery,
       voltage: newVoltage,
       flightMode: newMode,
@@ -386,11 +430,19 @@ class FlightPhysicsEngine {
   void selectMap(FlightMap newMap) {
     _activeMap = newMap;
     if (_state.flightMode == FlightMode.disarmed) {
+      _visualPitch = 0.0;
+      _visualRoll = 0.0;
+      _gimbalPitch = 0.0;
       _state = _state.copyWith(
         activeMap: newMap,
         position: newMap.homePosition,
         homePosition: newMap.homePosition,
         altitude: 0.0,
+        pitch: 0.0,
+        roll: 0.0,
+        visualPitch: 0.0,
+        visualRoll: 0.0,
+        gimbalPitch: 0.0,
       );
     } else {
       _state = _state.copyWith(activeMap: newMap);
@@ -403,6 +455,19 @@ class FlightPhysicsEngine {
     _manualYaw = yaw.clamp(-1.0, 1.0);
     _manualPitch = pitch.clamp(-1.0, 1.0);
     _manualRoll = roll.clamp(-1.0, 1.0);
+  }
+
+  /// Define o ângulo de inclinação do gimbal da câmera (pitch).
+  /// Clamped entre -90.0° (olhando para o solo) e 0.0° (olhando para o horizonte).
+  void setGimbalPitch(double degrees) {
+    _gimbalPitch = degrees.clamp(-90.0, 0.0);
+    _state = _state.copyWith(gimbalPitch: _gimbalPitch);
+    onStateChanged?.call(_state);
+  }
+
+  /// Ajusta incrementalmente o pitch do gimbal por [deltaDegrees].
+  void adjustGimbalPitch(double deltaDegrees) {
+    setGimbalPitch(_gimbalPitch + deltaDegrees);
   }
 
   void takeoff() {

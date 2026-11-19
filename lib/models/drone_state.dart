@@ -13,6 +13,9 @@ class DroneState {
   final double heading;
   final double pitch;
   final double roll;
+  final double gimbalPitch;
+  final double visualPitch;
+  final double visualRoll;
   final double batteryPercent;
   final double voltage;
   final FlightMode flightMode;
@@ -37,6 +40,9 @@ class DroneState {
     this.heading = 0.0,
     this.pitch = 0.0,
     this.roll = 0.0,
+    this.gimbalPitch = 0.0,
+    this.visualPitch = 0.0,
+    this.visualRoll = 0.0,
     this.batteryPercent = 100.0,
     this.voltage = 12.6,
     this.flightMode = FlightMode.disarmed,
@@ -62,6 +68,9 @@ class DroneState {
     double? heading,
     double? pitch,
     double? roll,
+    double? gimbalPitch,
+    double? visualPitch,
+    double? visualRoll,
     double? batteryPercent,
     double? voltage,
     FlightMode? flightMode,
@@ -86,6 +95,9 @@ class DroneState {
       heading: heading ?? this.heading,
       pitch: pitch ?? this.pitch,
       roll: roll ?? this.roll,
+      gimbalPitch: gimbalPitch ?? this.gimbalPitch,
+      visualPitch: visualPitch ?? this.visualPitch,
+      visualRoll: visualRoll ?? this.visualRoll,
       batteryPercent: batteryPercent ?? this.batteryPercent,
       voltage: voltage ?? this.voltage,
       flightMode: flightMode ?? this.flightMode,
