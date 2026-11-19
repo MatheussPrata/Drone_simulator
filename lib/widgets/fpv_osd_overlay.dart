@@ -62,6 +62,7 @@ class FpvOsdMath {
 ///    tanto na fita da bússola quanto no campo visual ou nas bordas da tela.
 class FpvOsdOverlay extends StatefulWidget {
   final SimulatorController? controller;
+  final CameraViewMode? cameraMode;
   final double yaw;
   final double visualPitch;
   final double visualRoll;
@@ -78,6 +79,7 @@ class FpvOsdOverlay extends StatefulWidget {
   const FpvOsdOverlay({
     super.key,
     this.controller,
+    this.cameraMode,
     this.yaw = 0.0,
     this.visualPitch = 0.0,
     this.visualRoll = 0.0,
@@ -134,6 +136,9 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
     final curX = ctrl != null ? ctrl.x : widget.droneX;
     final curY = ctrl != null ? ctrl.y : widget.droneY;
     final curZ = ctrl != null ? ctrl.z : widget.droneZ;
+    final cameraMode = widget.cameraMode ?? ctrl?.cameraMode ?? CameraViewMode.fpv;
+    final isThirdPerson = cameraMode == CameraViewMode.thirdPerson;
+    final effectiveShowLadder = widget.showHorizonLadder && !isThirdPerson;
 
     return IgnorePointer(
       child: CustomPaint(
@@ -148,7 +153,7 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
           droneZ: curZ,
           homeX: widget.homeX,
           homeY: widget.homeY,
-          showHorizonLadder: widget.showHorizonLadder,
+          showHorizonLadder: effectiveShowLadder,
           showTopCompass: widget.showTopCompass,
           showHomeMarker: widget.showHomeMarker,
         ),

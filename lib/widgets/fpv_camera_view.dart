@@ -188,6 +188,7 @@ class FpvCameraView extends StatefulWidget {
   final bool showGroundMap;
   final bool transparentGround;
   final bool? isSatellite;
+  final CameraViewMode? cameraMode;
 
   const FpvCameraView({
     super.key,
@@ -207,6 +208,7 @@ class FpvCameraView extends StatefulWidget {
     this.showGroundMap = true,
     this.transparentGround = true,
     this.isSatellite,
+    this.cameraMode,
   });
 
   @override
@@ -354,9 +356,18 @@ class _FpvCameraViewState extends State<FpvCameraView> {
     final curYaw = ctrl != null
         ? (ctrl.yaw != 0.0 ? ctrl.yaw : ctrl.physics.state.heading)
         : widget.yaw;
-    final curPitch = ctrl != null ? ctrl.visualPitch : widget.visualPitch;
-    final curRoll = ctrl != null ? ctrl.visualRoll : widget.visualRoll;
+    final curPitchRaw = ctrl != null ? ctrl.visualPitch : widget.visualPitch;
+    final curRollRaw = ctrl != null ? ctrl.visualRoll : widget.visualRoll;
     final curGimbal = ctrl != null ? ctrl.gimbalPitch : widget.gimbalPitch;
+    final cameraMode = widget.cameraMode ?? ctrl?.cameraMode ?? CameraViewMode.fpv;
+    final isThirdPerson = cameraMode == CameraViewMode.thirdPerson;
+
+    // Em 3ª Pessoa (Chase Cam):
+    // 1. Inclinação descendente fixa (-12°) para enquadrar perfeitamente o drone e o horizonte
+    final curPitch = isThirdPerson ? curPitchRaw - 12.0 : curPitchRaw;
+    // 2. Roll suavizado (damped 0.4) simulando câmera de perseguição estabilizada
+    final curRoll = isThirdPerson ? curRollRaw * 0.4 : curRollRaw;
+
     final activeMap = widget.flightMap ??
         ctrl?.physics.activeMap ??
         FlightMap.dronePark;

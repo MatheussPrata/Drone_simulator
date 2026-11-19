@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/widgets/chase_drone_overlay.dart';
 import 'package:drone_simulator/widgets/fpv_camera_view.dart';
 import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
 import 'package:drone_simulator/widgets/gimbal_slider.dart';
@@ -90,6 +91,10 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                       FpvOsdOverlay(
                         controller: _controller,
                       ),
+                      if (_controller.cameraMode == CameraViewMode.thirdPerson)
+                        ChaseDroneOverlay(
+                          controller: _controller,
+                        ),
                     ],
                   )
                 : MiniMapWidget(

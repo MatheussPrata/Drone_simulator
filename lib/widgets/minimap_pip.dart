@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/widgets/chase_drone_overlay.dart';
 import 'package:drone_simulator/widgets/fpv_camera_view.dart';
 import 'package:drone_simulator/widgets/map_settings_modal.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
@@ -63,10 +64,19 @@ class MiniMapPip extends StatelessWidget {
                             followDrone: true,
                             showControls: false,
                           )
-                        : FpvCameraView(
-                            controller: controller,
-                            showOsd: false,
-                            showGroundMap: true,
+                        : Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              FpvCameraView(
+                                controller: controller,
+                                showOsd: false,
+                                showGroundMap: true,
+                              ),
+                              if (controller.cameraMode == CameraViewMode.thirdPerson)
+                                ChaseDroneOverlay(
+                                  controller: controller,
+                                ),
+                            ],
                           ),
                   ),
 
