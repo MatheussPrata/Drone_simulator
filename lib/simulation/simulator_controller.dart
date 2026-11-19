@@ -150,6 +150,12 @@ class SimulatorController extends ChangeNotifier {
       batteryPercent: _battery,
       isCrashed: _status == SimulatorStatus.crashed,
       impactShake: _impactShake,
+      motorNormalizedRpm: motorNormalizedRpm,
+      rollRad: rollRad,
+      pitchRad: pitchRad,
+      yawRad: yawRad,
+      windSpeedMps: _windSpeedMps,
+      inVortexRingState: inVortexRingState,
     );
   }
 

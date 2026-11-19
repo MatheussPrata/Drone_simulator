@@ -24,6 +24,20 @@ class DroneState {
 
   /// Intensidade (0..1) da vibração de câmera após um impacto.
   final double impactShake;
+
+  /// Rotação normalizada dos 4 motores [FR, RL, FL, RR] (0..1).
+  final List<double> motorNormalizedRpm;
+
+  /// Atitude física em radianos (roll, pitch, yaw) vinda do motor 6-DOF.
+  final double rollRad;
+  final double pitchRad;
+  final double yawRad;
+
+  /// Módulo da velocidade do vento local (m/s).
+  final double windSpeedMps;
+
+  /// Verdadeiro quando o drone está em Vortex Ring State.
+  final bool inVortexRingState;
   final double heading;
   final double pitch;
   final double roll;
@@ -56,6 +70,12 @@ class DroneState {
     this.velocityNorthMs = 0.0,
     this.isCrashed = false,
     this.impactShake = 0.0,
+    this.motorNormalizedRpm = const [0.0, 0.0, 0.0, 0.0],
+    this.rollRad = 0.0,
+    this.pitchRad = 0.0,
+    this.yawRad = 0.0,
+    this.windSpeedMps = 0.0,
+    this.inVortexRingState = false,
     this.heading = 0.0,
     this.pitch = 0.0,
     this.roll = 0.0,
@@ -89,6 +109,12 @@ class DroneState {
     double? velocityNorthMs,
     bool? isCrashed,
     double? impactShake,
+    List<double>? motorNormalizedRpm,
+    double? rollRad,
+    double? pitchRad,
+    double? yawRad,
+    double? windSpeedMps,
+    bool? inVortexRingState,
     double? heading,
     double? pitch,
     double? roll,
@@ -121,6 +147,12 @@ class DroneState {
       velocityNorthMs: velocityNorthMs ?? this.velocityNorthMs,
       isCrashed: isCrashed ?? this.isCrashed,
       impactShake: impactShake ?? this.impactShake,
+      motorNormalizedRpm: motorNormalizedRpm ?? this.motorNormalizedRpm,
+      rollRad: rollRad ?? this.rollRad,
+      pitchRad: pitchRad ?? this.pitchRad,
+      yawRad: yawRad ?? this.yawRad,
+      windSpeedMps: windSpeedMps ?? this.windSpeedMps,
+      inVortexRingState: inVortexRingState ?? this.inVortexRingState,
       heading: heading ?? this.heading,
       pitch: pitch ?? this.pitch,
       roll: roll ?? this.roll,
