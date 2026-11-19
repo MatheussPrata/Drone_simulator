@@ -539,7 +539,7 @@
       }
       buildGeofenceAndNoFlyZones();
 
-      // ── Etapa 3: Construção do Modelo 3D do Drone com Hélices Animadas ──
+      // ── Modelo 3D do Drone ──
       var droneGroup = new THREE.Group();
       droneGroup.rotation.order = 'YXZ';
       var dronePropellers = [];
@@ -551,7 +551,7 @@
           metalness: 0.35
         });
         var accentMat = new THREE.MeshStandardMaterial({
-          color: 0x00d4ff, // Cyan esportivo
+          color: 0x00d4ff,
           roughness: 0.3,
           metalness: 0.6
         });
@@ -580,14 +580,12 @@
         bodyTop.castShadow = true;
         droneGroup.add(bodyTop);
 
-        // Faixa de destaque cyan
         var stripeGeo = new THREE.BoxGeometry(0.06, 0.02, 0.32);
         var stripe = new THREE.Mesh(stripeGeo, accentMat);
         stripe.position.set(0, 0.085, 0);
         stripe.castShadow = true;
         droneGroup.add(stripe);
 
-        // Nariz e câmera gimbal
         var gimbalBase = new THREE.Mesh(
           new THREE.SphereGeometry(0.045, 12, 12),
           new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9 })
@@ -604,8 +602,7 @@
         lensMesh.position.set(0, -0.01, -0.22);
         droneGroup.add(lensMesh);
 
-        // 2. Braços em 'X' (4 braços) e Motores
-        // Front-Right (+X, -Z), Front-Left (-X, -Z), Rear-Right (+X, +Z), Rear-Left (-X, +Z)
+        // 2. Braços em 'X' e Motores
         var motorOffsets = [
           { x: 0.22, z: -0.20, isFront: true, isRight: true, spinDir: 1 },
           { x: -0.22, z: -0.20, isFront: true, isRight: false, spinDir: -1 },
@@ -614,7 +611,6 @@
         ];
 
         motorOffsets.forEach(function (m) {
-          // Braço tubular conectando centro ao motor
           var armLen = Math.hypot(m.x, m.z);
           var armGeo = new THREE.BoxGeometry(0.035, 0.025, armLen);
           var armMesh = new THREE.Mesh(armGeo, armMat);
@@ -624,24 +620,20 @@
           armMesh.castShadow = true;
           droneGroup.add(armMesh);
 
-          // Sino do Motor
           var motorGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14);
           var motorMesh = new THREE.Mesh(motorGeo, motorMat);
           motorMesh.position.set(m.x, 0.045, m.z);
           motorMesh.castShadow = true;
           droneGroup.add(motorMesh);
 
-          // Hélices (Grupo rotativo com duas pás)
           var propHub = new THREE.Group();
           propHub.position.set(m.x, 0.072, m.z);
 
-          // Pás da hélice (comprimento total de ~24cm)
           var bladeGeo = new THREE.BoxGeometry(0.022, 0.004, 0.26);
           var bladeMesh = new THREE.Mesh(bladeGeo, propMat);
           bladeMesh.castShadow = true;
           propHub.add(bladeMesh);
 
-          // Cap / Porca central
           var nutGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.015, 8);
           var nutMesh = new THREE.Mesh(nutGeo, motorMat);
           nutMesh.position.y = 0.008;
@@ -653,7 +645,6 @@
             dir: m.spinDir
           });
 
-          // LEDs nos braços (Brancos na frente, Vermelhos/Verdes atrás)
           var ledColor = m.isFront ? 0xffffff : (m.isRight ? 0x00ff44 : 0xff2222);
           var ledGeo = new THREE.SphereGeometry(0.018, 8, 8);
           var ledMat = new THREE.MeshBasicMaterial({ color: ledColor });
@@ -662,19 +653,17 @@
           droneGroup.add(ledMesh);
         });
 
-        // 3. Trem de Pouso (2 skids inferiores)
+        // 3. Trem de Pouso
         var skidMat = new THREE.MeshStandardMaterial({ color: 0x141618, roughness: 0.8 });
         var skidGeo = new THREE.BoxGeometry(0.018, 0.012, 0.32);
         var strutGeo = new THREE.BoxGeometry(0.014, 0.075, 0.014);
 
         [-0.09, 0.09].forEach(function (sx) {
-          // Barra horizontal de apoio
           var skid = new THREE.Mesh(skidGeo, skidMat);
           skid.position.set(sx, -0.05, 0);
           skid.castShadow = true;
           droneGroup.add(skid);
 
-          // Hastes verticais conectando ao corpo
           [-0.10, 0.10].forEach(function (sz) {
             var strut = new THREE.Mesh(strutGeo, skidMat);
             strut.position.set(sx, -0.015, sz);
@@ -683,7 +672,6 @@
           });
         });
 
-        // Habilita sombras em todas as partes do drone
         droneGroup.traverse(function (child) {
           if (child.isMesh) {
             child.castShadow = true;
@@ -691,11 +679,17 @@
           }
         });
 
-        // Posiciona pousado no heliponto Home (z = 0 -> altura da base do trem de pouso sobre o pad)
         droneGroup.position.set(0, 0.11, 0);
+        // Inicialmente em modo FPV, droneGroup fica oculto
+        droneGroup.visible = false;
         scene.add(droneGroup);
       }
       buildDroneModel();
+
+      // ── Câmera Dinâmica (FPV vs 3ª Pessoa / Chase Cam) ──
+      var chaseCamPos = new THREE.Vector3(0, 1.8, 4.5);
+      var chaseCamLook = new THREE.Vector3(0, 0.5, 0);
+      var hasSnapped = false;
 
       // ── API Exposta para o Flutter ──
       window.updateDroneState = function (jsonState) {
@@ -726,19 +720,15 @@
         if (typeof data.status === 'string') droneState.status = data.status;
 
         updateDroneTransform();
-        updateCamera();
       };
 
-      // ── Atualização de Posição e Rotação Física do Drone 3D ──
       function updateDroneTransform() {
         var droneX = droneState.x;
         var droneY = droneState.z;
         var droneZ = -droneState.y;
 
-        // Posição no mundo 3D (com offset mínimo de 0.11m para os skids pousarem perfeitamente no chão/heliponto)
         droneGroup.position.set(droneX, droneY + 0.11, droneZ);
 
-        // Rotação física nas 3 dimensões (Yaw, Pitch, Roll)
         var yawRad = -(droneState.yaw * Math.PI / 180.0);
         var pitchRad = droneState.visualPitch * Math.PI / 180.0;
         var rollRad = -(droneState.visualRoll * Math.PI / 180.0);
@@ -746,7 +736,8 @@
         droneGroup.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
       }
 
-      function updateCamera() {
+      // ── Atualização da Câmera por Frame ──
+      function updateCameraFrame() {
         var droneX = droneState.x;
         var droneY = droneState.z;
         var droneZ = -droneState.y;
@@ -756,24 +747,54 @@
         var rollRad = -(droneState.visualRoll * Math.PI / 180.0);
 
         if (droneState.cameraMode === 'thirdPerson') {
+          // Modo 3ª Pessoa: droneGroup visível
+          droneGroup.visible = true;
+
+          // Câmera 4.5m atrás e 1.8m acima do drone
           var dist = 4.5;
           var height = 1.8;
-          var camX = droneX + Math.sin(yawRad) * dist;
-          var camY = Math.max(0.5, droneY + height);
-          var camZ = droneZ + Math.cos(yawRad) * dist;
-          camera.position.set(camX, camY, camZ);
-          camera.lookAt(droneX, droneY + 0.5, droneZ);
+          var targetCamX = droneX + Math.sin(yawRad) * dist;
+          var targetCamY = Math.max(0.4, droneY + height);
+          var targetCamZ = droneZ + Math.cos(yawRad) * dist;
+
+          // Ponto de foco: ligeiramente à frente do drone e no horizonte
+          var lookDist = 2.0;
+          var targetLookX = droneX - Math.sin(yawRad) * lookDist;
+          var targetLookY = droneY + 0.5;
+          var targetLookZ = droneZ - Math.cos(yawRad) * lookDist;
+
+          var targetCamVec = new THREE.Vector3(targetCamX, targetCamY, targetCamZ);
+          var targetLookVec = new THREE.Vector3(targetLookX, targetLookY, targetLookZ);
+
+          if (!hasSnapped) {
+            chaseCamPos.copy(targetCamVec);
+            chaseCamLook.copy(targetLookVec);
+            hasSnapped = true;
+          } else {
+            // Interpolação suave lerp para sensação cinematográfica de perseguição
+            chaseCamPos.lerp(targetCamVec, 0.10);
+            chaseCamLook.lerp(targetLookVec, 0.12);
+          }
+
+          camera.position.copy(chaseCamPos);
+          camera.lookAt(chaseCamLook);
         } else {
-          camera.position.set(droneX, Math.max(0.2, droneY + 0.1), droneZ);
+          // Modo 1ª Pessoa (FPV): ocultar a malha do próprio drone
+          droneGroup.visible = false;
+          hasSnapped = false;
+
+          // Câmera posicionada na lente no nariz do drone
+          camera.position.set(droneX, Math.max(0.18, droneY + 0.12), droneZ);
+          // Rotação com Yaw, Roll e GimbalPitch (0° no horizonte até -90° no Nadir)
           camera.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
         }
       }
 
-      // ── Loop de Renderização e Animação das Hélices ──
+      // ── Loop de Renderização e Animação ──
       function animate() {
         requestAnimationFrame(animate);
 
-        // Anima rotação das 4 hélices continuamente se o drone estiver ativo ou voando
+        // Animação contínua das hélices quando o drone está ativo
         var isSpinning = droneState.flying ||
           droneState.status === 'flying' ||
           droneState.status === 'hovering' ||
@@ -789,6 +810,7 @@
           }
         }
 
+        updateCameraFrame();
         renderer.render(scene, camera);
       }
       animate();
@@ -802,7 +824,7 @@
         renderer.setSize(w, h);
       });
 
-      console.log('Drone 3D Low-Poly inicializado com sucesso.');
+      console.log('Câmera dinâmica FPV e 3ª Pessoa configurada com sucesso.');
     })();
   </script>
 </body>
