@@ -69,7 +69,8 @@ class TelemetryHud extends StatelessWidget {
           final c = controller!;
           final dist = sqrt(c.x * c.x + c.y * c.y);
           final spd = c.physics.state.speedKmh;
-          final geofenceWarn = c.physics.state.isGeofenceWarning;
+          final geofenceWarn =
+              c.physics.state.isGeofenceWarning && dist >= 450.0;
           final noFlyWarn = c.physics.state.inNoFlyZone;
 
           return _buildHudContent(
@@ -149,61 +150,68 @@ class TelemetryHud extends StatelessWidget {
                 ),
               ],
             ),
-            child: Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                // Grupo de Telemetria
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+            child: SizedBox(
+              width: double.infinity,
+              // A barra inteira cabe na largura do landscape: se a tela for
+              // muito estreita, o conteúdo reduz de escala em vez de cortar.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildPill(
-                      icon: Icons.height,
-                      label: 'ALTITUDE',
-                      value: '${curAlt.toStringAsFixed(1)} m',
-                      valueColor: Colors.cyanAccent,
+                    // Grupo de Telemetria (linha única)
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        _buildPill(
+                          icon: Icons.height,
+                          label: 'ALTITUDE',
+                          value: '${curAlt.toStringAsFixed(1)} m',
+                          valueColor: Colors.cyanAccent,
+                        ),
+                        _buildPill(
+                          icon: Icons.speed,
+                          label: 'VELOCIDADE',
+                          value: '${curSpeed.toStringAsFixed(1)} km/h',
+                          valueColor: Colors.white,
+                        ),
+                        _buildPill(
+                          icon: Icons.home_outlined,
+                          label: 'HOME',
+                          value: '${curDist.toStringAsFixed(0)} m',
+                          valueColor: Colors.white,
+                        ),
+                        _buildBatteryPill(curBattery),
+                      ],
                     ),
-                    _buildPill(
-                      icon: Icons.speed,
-                      label: 'VELOCIDADE',
-                      value: '${curSpeed.toStringAsFixed(1)} km/h',
-                      valueColor: Colors.white,
-                    ),
-                    _buildPill(
-                      icon: Icons.home_outlined,
-                      label: 'HOME',
-                      value: '${curDist.toStringAsFixed(0)} m',
-                      valueColor: Colors.white,
-                    ),
-                    _buildBatteryPill(curBattery),
+
+                    const SizedBox(width: 14),
+
+                    // Grupo de Modo de Câmera e Ações de Voo (topo)
+                    if (actionsPlacement == HudActionsPlacement.top)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildCameraModeButton(
+                            cameraMode: curCameraMode,
+                            onToggle: toggleCameraCb,
+                          ),
+                          const SizedBox(width: 6),
+                          _buildMapSettingsButton(context),
+                          const SizedBox(width: 6),
+                          FlightActionButtons(
+                            onTakeoff: takeoffCb,
+                            onLand: landCb,
+                            onRth: rthCb,
+                            onReset: resetCb,
+                            orientation: Axis.horizontal,
+                          ),
+                        ],
+                      ),
                   ],
                 ),
-
-                // Grupo de Modo de Câmera e Ações de Voo (quando posicionados no topo)
-                if (actionsPlacement == HudActionsPlacement.top)
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      _buildCameraModeButton(
-                        cameraMode: curCameraMode,
-                        onToggle: toggleCameraCb,
-                      ),
-                      _buildMapSettingsButton(context),
-                      FlightActionButtons(
-                        onTakeoff: takeoffCb,
-                        onLand: landCb,
-                        onRth: rthCb,
-                        onReset: resetCb,
-                        orientation: Axis.horizontal,
-                      ),
-                    ],
-                  ),
-              ],
+              ),
             ),
           ),
 
