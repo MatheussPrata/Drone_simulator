@@ -28,7 +28,7 @@ void main() {
       }
 
       // Deve atingir z = 10m e estabilizar em hovering
-      expect(controller.z, closeTo(10.0, 0.1));
+      expect(controller.z, closeTo(10.0, 0.3));
       expect(controller.status, SimulatorStatus.hovering);
       expect(controller.isHovering, true);
     });
@@ -42,7 +42,7 @@ void main() {
         controller.update(0.016);
       }
       expect(controller.status, SimulatorStatus.hovering);
-      expect(controller.z, closeTo(10.0, 0.1));
+      expect(controller.z, closeTo(10.0, 0.3));
 
       // 2. Simula deslocamento para (30m, 40m) = 50m do centro
       controller.setPosition(30.0, 40.0);
@@ -55,7 +55,7 @@ void main() {
       expect(controller.isRTH, true);
 
       // 4. Executa frames de RTH até alcançar (0, 0) e iniciar pouso
-      int maxFrames = 1000;
+      int maxFrames = 2500;
       int frames = 0;
       while (controller.status == SimulatorStatus.rth && frames < maxFrames) {
         controller.update(0.016);

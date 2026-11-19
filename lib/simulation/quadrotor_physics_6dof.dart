@@ -673,11 +673,12 @@ class QuadrotorPhysicsEngine {
 
     final base = collectiveNormalized.clamp(0.0, 1.0);
 
-    // Mixer em X (FR, RL, FL, RR) — consistente com os torques calculados.
-    final m0 = (base + pitchCmd + rollCmd - yawCmd).clamp(0.0, 1.0); // FR
-    final m1 = (base + pitchCmd - rollCmd + yawCmd).clamp(0.0, 1.0); // RL
-    final m2 = (base - pitchCmd + rollCmd + yawCmd).clamp(0.0, 1.0); // FL
-    final m3 = (base - pitchCmd - rollCmd - yawCmd).clamp(0.0, 1.0); // RR
+    // Mixer em X (FR, RL, FL, RR) — consistente com os torques calculados:
+    // tauPitch ∝ (t0+t2)-(t1+t3); tauRoll ∝ (t1+t2)-(t0+t3); tauYaw ∝ (t2+t3)-(t0+t1).
+    final m0 = (base + pitchCmd - rollCmd - yawCmd).clamp(0.0, 1.0); // FR
+    final m1 = (base - pitchCmd + rollCmd - yawCmd).clamp(0.0, 1.0); // RL
+    final m2 = (base + pitchCmd + rollCmd + yawCmd).clamp(0.0, 1.0); // FL
+    final m3 = (base - pitchCmd - rollCmd + yawCmd).clamp(0.0, 1.0); // RR
 
     return <double>[m0, m1, m2, m3];
   }

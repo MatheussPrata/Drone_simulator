@@ -54,6 +54,10 @@
         flying: false,
         battery: 100.0,
         impactShake: 0.0,
+        motors: [0.0, 0.0, 0.0, 0.0],
+        pitchRad: 0.0,
+        rollRad: 0.0,
+        yawRad: 0.0,
         isArmed: false,
         status: 'landed'
       };
@@ -763,6 +767,14 @@
         if (typeof data.isArmed === 'boolean') droneState.isArmed = data.isArmed;
         if (typeof data.status === 'string') droneState.status = data.status;
         if (typeof data.impactShake === 'number') droneState.impactShake = data.impactShake;
+        if (typeof data.pitchRad === 'number') droneState.pitchRad = data.pitchRad;
+        if (typeof data.rollRad === 'number') droneState.rollRad = data.rollRad;
+        if (typeof data.yawRad === 'number') droneState.yawRad = data.yawRad;
+        if (Array.isArray(data.motors) && data.motors.length >= 4) {
+          droneState.motors = data.motors.map(function (m) {
+            return Math.min(1.0, Math.max(0.0, Number(m) || 0.0));
+          });
+        }
 
         updateDroneTransform();
       };
@@ -774,9 +786,16 @@
 
         droneGroup.position.set(droneX, droneY + 0.11, droneZ);
 
-        var yawRad = -(droneState.yaw * Math.PI / 180.0);
-        var pitchRad = droneState.visualPitch * Math.PI / 180.0;
-        var rollRad = -(droneState.visualRoll * Math.PI / 180.0);
+        // Orientação física 6-DOF (radianos) tem prioridade sobre os graus antigos.
+        var yawRad = Number.isFinite(droneState.yawRad) && droneState.yawRad !== 0.0
+          ? droneState.yawRad
+          : -(droneState.yaw * Math.PI / 180.0);
+        var pitchRad = Number.isFinite(droneState.pitchRad) && droneState.pitchRad !== 0.0
+          ? droneState.pitchRad
+          : droneState.visualPitch * Math.PI / 180.0;
+        var rollRad = Number.isFinite(droneState.rollRad) && droneState.rollRad !== 0.0
+          ? -droneState.rollRad
+          : -(droneState.visualRoll * Math.PI / 180.0);
 
         droneGroup.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
       }
@@ -888,11 +907,17 @@
           droneState.status === 'landing' ||
           droneState.z > 0.05;
 
-        if (isSpinning) {
-          var spinSpeed = 0.65;
-          for (var i = 0; i < dronePropellers.length; i++) {
-            dronePropellers[i].hub.rotation.y += spinSpeed * dronePropellers[i].dir;
-          }
+        var motors = droneState.motors || [0.0, 0.0, 0.0, 0.0];
+        for (var i = 0; i < dronePropellers.length; i++) {
+          var motorNorm = isSpinning
+            ? Math.min(1.0, Math.max(0.0, motors[i % 4] || 0.0))
+            : 0.0;
+          // Rotação visual proporcional ao RPM normalizado de cada motor.
+          var propSpeed = isSpinning
+            ? (6.0 + 46.0 * motorNorm)
+            : Math.max(0.0, 0.65 - (droneState.z > 0.05 ? 0.0 : 0.65));
+          dronePropellers[i].hub.rotation.y +=
+            propSpeed * dronePropellers[i].dir * frameDt;
         }
 
         updateCameraFrame(frameDt);

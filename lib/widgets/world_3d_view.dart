@@ -111,9 +111,15 @@ class _World3dViewState extends State<World3dView> {
         s.status == SimulatorStatus.rth ||
         s.status == SimulatorStatus.hovering;
 
+    final motors = s.motorNormalizedRpm
+        .map((m) => m.clamp(0.0, 1.0).toStringAsFixed(3))
+        .join(',');
+
     return '{"x":${s.x.toStringAsFixed(2)},"y":${s.y.toStringAsFixed(2)},"z":${s.z.toStringAsFixed(2)},'
         '"yaw":${s.yaw.toStringAsFixed(2)},"pitch":${s.visualPitch.toStringAsFixed(2)},"roll":${s.visualRoll.toStringAsFixed(2)},'
         '"visualPitch":${s.visualPitch.toStringAsFixed(2)},"visualRoll":${s.visualRoll.toStringAsFixed(2)},'
+        '"pitchRad":${s.pitchRad.toStringAsFixed(4)},"rollRad":${s.rollRad.toStringAsFixed(4)},'
+        '"yawRad":${s.yawRad.toStringAsFixed(4)},"motors":[$motors],'
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
         '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":${s.isArmed},'
         '"impactShake":${s.impactShake.toStringAsFixed(3)},'

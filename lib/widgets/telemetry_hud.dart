@@ -68,9 +68,8 @@ class TelemetryHud extends StatelessWidget {
         builder: (context, _) {
           final c = controller!;
           final dist = sqrt(c.x * c.x + c.y * c.y);
-          final spd = c.physics.state.speedKmh;
-          final geofenceWarn =
-              c.physics.state.isGeofenceWarning && dist >= 450.0;
+          final spd = c.speedKmh;
+          final geofenceWarn = dist >= 450.0;
           final noFlyWarn = c.physics.state.inNoFlyZone;
 
           return _buildHudContent(
@@ -82,6 +81,9 @@ class TelemetryHud extends StatelessWidget {
             curCameraMode: c.cameraMode,
             curGeofenceWarn: isGeofenceWarning || geofenceWarn,
             curNoFlyWarn: isNoFlyWarning || noFlyWarn,
+            flightModeLabel: c.flightModeLabel,
+            onCycleFlightMode: c.cycleFlightMode,
+            showVrs: c.inVortexRingState,
             takeoffCb: onTakeoff ?? (c.isLanded ? c.armAndTakeoff : null),
             landCb: onLand ?? (!c.isLanded ? c.land : null),
             rthCb: onRth ?? (!c.isLanded ? c.triggerRTH : null),
@@ -118,6 +120,9 @@ class TelemetryHud extends StatelessWidget {
     required CameraViewMode curCameraMode,
     required bool curGeofenceWarn,
     required bool curNoFlyWarn,
+    String? flightModeLabel,
+    VoidCallback? onCycleFlightMode,
+    bool showVrs = false,
     required VoidCallback? takeoffCb,
     required VoidCallback? landCb,
     required VoidCallback? rthCb,
@@ -193,6 +198,17 @@ class TelemetryHud extends StatelessWidget {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (flightModeLabel != null) ...[
+                            _buildFlightModeButton(
+                              label: flightModeLabel,
+                              onTap: onCycleFlightMode,
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          if (showVrs) ...[
+                            _buildVrsBadge(),
+                            const SizedBox(width: 6),
+                          ],
                           _buildCameraModeButton(
                             cameraMode: curCameraMode,
                             onToggle: toggleCameraCb,
@@ -229,6 +245,62 @@ class TelemetryHud extends StatelessWidget {
               message: warningMessage ?? 'ALERTA: LIMITE MÁXIMO DE GEOFENCE (500M) PRÓXIMO!',
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFlightModeButton({required String label, VoidCallback? onTap}) {
+    const color = Colors.amberAccent;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('btn_flight_mode'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.16),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withOpacity(0.55), width: 1.0),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.tune, size: 14, color: color),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVrsBadge() {
+    return Container(
+      key: const Key('badge_vrs'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.deepOrange.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.deepOrangeAccent, width: 1.0),
+      ),
+      child: const Text(
+        'VRS',
+        style: TextStyle(
+          color: Colors.deepOrangeAccent,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
