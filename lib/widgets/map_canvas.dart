@@ -76,7 +76,7 @@ class _MapCanvasState extends State<MapCanvas> {
     final double curX = ctrl != null ? ctrl.x : widget.droneX;
     final double curY = ctrl != null ? ctrl.y : widget.droneY;
     final double curZ = ctrl != null ? ctrl.z : widget.droneZ;
-    final double curYaw = ctrl != null ? ctrl.physics.state.heading : widget.yaw;
+    final double curYaw = ctrl != null ? (ctrl.yaw != 0.0 ? ctrl.yaw : ctrl.physics.state.heading) : widget.yaw;
     final activeMap = widget.flightMap ?? ctrl?.physics.activeMap ?? FlightMap.dronePark;
     final nfzList = widget.noFlyZones ?? activeMap.noFlyZones;
 

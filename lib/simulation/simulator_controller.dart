@@ -33,8 +33,14 @@ class SimulatorController extends ChangeNotifier {
   double _x = 0.0;
   double _y = 0.0;
   double _z = 0.0;
+  double _yaw = 0.0;
   double _battery = 100.0;
   bool _isArmed = false;
+
+  double _manualThrottle = 0.0;
+  double _manualYaw = 0.0;
+  double _manualPitch = 0.0;
+  double _manualRoll = 0.0;
 
   SimulatorController({FlightPhysics? physics})
       : physics = physics ?? FlightPhysics();
@@ -43,6 +49,7 @@ class SimulatorController extends ChangeNotifier {
   double get x => _x;
   double get y => _y;
   double get z => _z;
+  double get yaw => _yaw;
   double get battery => _battery;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
@@ -104,11 +111,37 @@ class SimulatorController extends ChangeNotifier {
     _x = 0.0;
     _y = 0.0;
     _z = 0.0;
+    _yaw = 0.0;
+    _manualThrottle = 0.0;
+    _manualYaw = 0.0;
+    _manualPitch = 0.0;
+    _manualRoll = 0.0;
     _battery = 100.0;
     _isArmed = false;
     physics.resetBattery();
     physics.selectMap(physics.activeMap);
     notifyListeners();
+  }
+
+  /// Define entradas manuais analógicas (Modo 2)
+  void setManualInput({
+    double throttle = 0.0,
+    double yaw = 0.0,
+    double pitch = 0.0,
+    double roll = 0.0,
+  }) {
+    _manualThrottle = throttle;
+    _manualYaw = yaw;
+    _manualPitch = pitch;
+    _manualRoll = roll;
+    physics.setManualInput(throttle, yaw, pitch, roll);
+    if ((_status == SimulatorStatus.hovering || _status == SimulatorStatus.takingOff) &&
+        (_manualThrottle.abs() > 0.05 ||
+            _manualYaw.abs() > 0.05 ||
+            _manualPitch.abs() > 0.05 ||
+            _manualRoll.abs() > 0.05)) {
+      _status = SimulatorStatus.flying;
+    }
   }
 
   /// Permite definir coordenadas (x, y, [z]) para posicionamento ou simulação
@@ -155,7 +188,30 @@ class SimulatorController extends ChangeNotifier {
 
       case SimulatorStatus.hovering:
       case SimulatorStatus.flying:
-        // Mantém altitude estável
+        if (_manualThrottle.abs() > 0.05) {
+          _z = (_z + _manualThrottle * climbSpeed * dt).clamp(0.0, 120.0);
+        }
+        if (_manualYaw.abs() > 0.05) {
+          _yaw = (_yaw + _manualYaw * 90.0 * dt) % 360.0;
+        }
+        if (_manualPitch.abs() > 0.05 || _manualRoll.abs() > 0.05) {
+          final rad = _yaw * pi / 180.0;
+          const speed = 12.0;
+          final dx = (sin(rad) * _manualPitch + cos(rad) * _manualRoll) * speed;
+          final dy = (cos(rad) * _manualPitch - sin(rad) * _manualRoll) * speed;
+          _x += dx * dt;
+          _y += dy * dt;
+
+          final val = GeofenceValidator.validateCartesian(
+            x: _x,
+            y: _y,
+            noFlyZones: physics.activeMap.noFlyZones,
+            origin: physics.activeMap.center,
+          );
+          _x = val.x;
+          _y = val.y;
+        }
+        _battery = max(0.0, _battery - 0.02 * dt);
         break;
 
       case SimulatorStatus.rth:
