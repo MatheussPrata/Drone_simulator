@@ -39,5 +39,13 @@ void main() {
       expect(html.contains('window.loadWorldObstacles'), true);
       expect(html.contains('window.updateDroneState'), true);
     });
+
+    test('Cena usa atitude em radianos e RPM individual das 4 hélices', () {
+      expect(html.contains('pitchRad'), true);
+      expect(html.contains('rollRad'), true);
+      expect(html.contains('yawRad'), true);
+      expect(html.contains('droneState.motors'), true);
+      expect(html.contains('motorNorm'), true);
+    });
   });
 }

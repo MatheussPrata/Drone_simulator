@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:drone_simulator/models/flight_map.dart';
-import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 
@@ -56,14 +55,16 @@ void main() {
         if (controller.status == SimulatorStatus.hovering) break;
       }
       expect(controller.status, SimulatorStatus.hovering);
-      expect(controller.speedKmh, lessThan(3.0));
+      // Vento do Distrito Urbano (2, -1) gera deriva natural sem GPS hold.
+      final hoverSpeed = controller.speedKmh;
+      expect(hoverSpeed, lessThan(12.0));
 
       controller.setManualInput(pitch: 1.0);
       for (var i = 0; i < 120; i++) {
         controller.update(0.016);
       }
 
-      expect(controller.speedKmh, greaterThan(5.0),
+      expect(controller.speedKmh, greaterThan(hoverSpeed + 5.0),
           reason: 'HUD deve receber velocidade real do snapshot 6-DOF');
       expect(controller.motorNormalizedRpm.length, 4);
       expect(controller.motorNormalizedRpm.every((m) => m > 0.0), true);
