@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/widgets/fpv_camera_view.dart';
+import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
+import 'package:drone_simulator/widgets/gimbal_slider.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 import 'package:drone_simulator/widgets/virtual_joystick.dart';
@@ -67,11 +69,20 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Camada 1: Visão Principal (FPV 3D ou Mapa Real) ──
+          // ── Camada 1: Visão Principal (FPV 3D com OSD estilo DJI ou Mapa Real) ──
           Positioned.fill(
             child: _isFpvMain
-                ? FpvCameraView(
-                    controller: _controller,
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      FpvCameraView(
+                        controller: _controller,
+                        showOsd: false,
+                      ),
+                      FpvOsdOverlay(
+                        controller: _controller,
+                      ),
+                    ],
                   )
                 : MiniMapWidget(
                     controller: _controller,
@@ -160,47 +171,12 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
             ),
           ),
 
-          // ── Camada 3: Controle Rápido de Inclinação do Gimbal da Câmera ──
+          // ── Camada 3: Slider Vertical de Inclinação do Gimbal da Câmera (0° a -90°) ──
           Positioned(
-            right: 24,
+            right: 20,
             bottom: 155, // Posicionado acima do joystick direito
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.75),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.cyanAccent.withOpacity(0.4),
-                  width: 1.0,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 18,
-                    icon: const Icon(Icons.arrow_upward, color: Colors.cyanAccent),
-                    tooltip: 'Gimbal Horizonte (0°)',
-                    onPressed: () => _controller.adjustGimbalPitch(15.0),
-                  ),
-                  const Text(
-                    'GIMBAL',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 18,
-                    icon: const Icon(Icons.arrow_downward, color: Colors.cyanAccent),
-                    tooltip: 'Gimbal Solo (-90°)',
-                    onPressed: () => _controller.adjustGimbalPitch(-15.0),
-                  ),
-                ],
-              ),
+            child: GimbalSlider(
+              controller: _controller,
             ),
           ),
 

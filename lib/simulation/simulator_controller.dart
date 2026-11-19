@@ -155,6 +155,12 @@ class SimulatorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Define a orientação yaw em graus [0, 360)
+  void setYaw(double newYaw) {
+    _yaw = (newYaw % 360.0 + 360.0) % 360.0;
+    notifyListeners();
+  }
+
   /// Define o nível de bateria percentual [0-100]
   void setBattery(double percent) {
     _battery = percent.clamp(0.0, 100.0);
