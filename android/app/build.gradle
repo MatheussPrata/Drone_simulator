@@ -5,6 +5,9 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def keystorePath = System.getenv("KEYSTORE_PATH")
+def hasReleaseKeystore = keystorePath != null && file(keystorePath).exists()
+
 android {
     namespace = "com.dronesim.drone_simulator"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +33,22 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            signingConfig = hasReleaseKeystore
+                    ? signingConfigs.getByName("release")
+                    : signingConfigs.getByName("debug")
         }
     }
 }
