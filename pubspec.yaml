@@ -12,6 +12,7 @@ dependencies:
   flutter_map: ^6.1.0
   latlong2: ^0.9.1
   flutter_riverpod: ^2.4.9
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
@@ -20,3 +21,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/scene3d/

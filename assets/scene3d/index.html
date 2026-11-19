@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
+  <title>Drone Simulator 3D World</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #0b1118;
+      touch-action: none;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <script src="three.min.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      // ── Estado Global do Drone ──
+      var droneState = {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        yaw: 0.0,
+        pitch: 0.0,
+        roll: 0.0,
+        visualPitch: 0.0,
+        visualRoll: 0.0,
+        gimbalPitch: 0.0,
+        cameraMode: 'fpv', // 'fpv' ou 'thirdPerson'
+        flying: false,
+        battery: 100.0,
+        isArmed: false,
+        status: 'landed'
+      };
+
+      // ── Cena, Câmera e Renderizador Three.js ──
+      var container = document.getElementById('canvas-container');
+      var scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x8cb5df);
+      scene.fog = new THREE.FogExp2(0x8cb5df, 0.0016);
+
+      var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+      camera.rotation.order = 'YXZ';
+      camera.position.set(0, 1.8, 4.5);
+
+      var renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance'
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      container.appendChild(renderer.domElement);
+
+      // ── Iluminação Atmosférica ──
+      var hemiLight = new THREE.HemisphereLight(0xdff0ff, 0x3d502a, 0.65);
+      hemiLight.position.set(0, 500, 0);
+      scene.add(hemiLight);
+
+      var sunLight = new THREE.DirectionalLight(0xfffaee, 1.25);
+      sunLight.position.set(150, 320, 180);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 2048;
+      sunLight.shadow.mapSize.height = 2048;
+      sunLight.shadow.camera.near = 10;
+      sunLight.shadow.camera.far = 900;
+      sunLight.shadow.camera.left = -400;
+      sunLight.shadow.camera.right = 400;
+      sunLight.shadow.camera.top = 400;
+      sunLight.shadow.camera.bottom = -400;
+      sunLight.shadow.bias = -0.0004;
+      scene.add(sunLight);
+
+      // ── Geração Procedural da Textura do Terreno (Grama + Estradas + Pista) ──
+      function createGroundTexture() {
+        var size = 2048;
+        var canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        var ctx = canvas.getContext('2d');
+
+        // Grama base com gradiente sutil
+        var grad = ctx.createRadialGradient(size / 2, size / 2, 50, size / 2, size / 2, size * 0.7);
+        grad.addColorStop(0, '#588a3e');
+        grad.addColorStop(0.5, '#4f7d37');
+        grad.addColorStop(1, '#446e2f');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+
+        // Variações de ruído e lotes de grama
+        ctx.fillStyle = 'rgba(70, 110, 40, 0.25)';
+        for (var i = 0; i < 200; i++) {
+          var rx = (Math.sin(i * 997) * 0.5 + 0.5) * size;
+          var ry = (Math.cos(i * 613) * 0.5 + 0.5) * size;
+          var rw = 30 + ((i * 17) % 80);
+          var rh = 20 + ((i * 31) % 60);
+          ctx.beginPath();
+          ctx.ellipse(rx, ry, rw, rh, (i * 0.4), 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Pista de pouso e decolagem em asfalto claro / concreto (120m x 24m convertida em pixels)
+        // O terreno tem 1600m x 1600m -> 1 metro = 2048 / 1600 = 1.28 pixels
+        var scale = size / 1600.0;
+        var centerX = size / 2;
+        var centerY = size / 2;
+
+        // Pista Leste-Oeste deslocada ao norte
+        var runwayWidth = 220 * scale;
+        var runwayHeight = 32 * scale;
+        var runwayX = centerX - runwayWidth / 2;
+        var runwayY = centerY - 140 * scale;
+
+        ctx.fillStyle = '#4a5057'; // Asfalto escuro
+        ctx.fillRect(runwayX, runwayY, runwayWidth, runwayHeight);
+
+        // Faixas da pista
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 * scale;
+        ctx.strokeRect(runwayX + 2, runwayY + 2, runwayWidth - 4, runwayHeight - 4);
+
+        // Linha tracejada central da pista
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 * scale;
+        ctx.setLineDash([8 * scale, 6 * scale]);
+        ctx.beginPath();
+        ctx.moveTo(runwayX + 15 * scale, runwayY + runwayHeight / 2);
+        ctx.lineTo(runwayX + runwayWidth - 15 * scale, runwayY + runwayHeight / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Estradas principais cruzando a cidade (Norte-Sul e Leste-Oeste)
+        var roadWidth = 18 * scale;
+        ctx.fillStyle = '#32363b';
+
+        // Estrada Norte-Sul (passando pelo centro)
+        ctx.fillRect(centerX - roadWidth / 2, 0, roadWidth, size);
+
+        // Estrada Leste-Oeste (passando pelo centro)
+        ctx.fillRect(0, centerY - roadWidth / 2, size, roadWidth);
+
+        // Estradas secundárias anelares
+        var ringRadius = 240 * scale;
+        ctx.strokeStyle = '#32363b';
+        ctx.lineWidth = 12 * scale;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Linhas centrais amarelas tracejadas nas estradas
+        ctx.strokeStyle = '#e6b800';
+        ctx.lineWidth = 1.5 * scale;
+        ctx.setLineDash([6 * scale, 6 * scale]);
+
+        // Linha Norte-Sul
+        ctx.beginPath();
+        ctx.moveTo(centerX, 0);
+        ctx.lineTo(centerX, size);
+        ctx.stroke();
+
+        // Linha Leste-Oeste
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        ctx.lineTo(size, centerY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        var texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        return texture;
+      }
+
+      var groundGeo = new THREE.PlaneGeometry(1600, 1600);
+      groundGeo.rotateX(-Math.PI / 2);
+      var groundMat = new THREE.MeshStandardMaterial({
+        map: createGroundTexture(),
+        roughness: 0.88,
+        metalness: 0.08
+      });
+      var ground = new THREE.Mesh(groundGeo, groundMat);
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      // Grid auxiliar discreto no horizonte distante
+      var gridHelper = new THREE.GridHelper(1600, 80, 0x6e9060, 0x5a7850);
+      gridHelper.position.y = 0.02;
+      scene.add(gridHelper);
+
+      // ── API Exposta para o Flutter ──
+      window.updateDroneState = function (jsonState) {
+        var data = jsonState;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            console.error('Falha ao interpretar JSON no updateDroneState:', e);
+            return;
+          }
+        }
+        if (!data || typeof data !== 'object') return;
+
+        if (typeof data.x === 'number') droneState.x = data.x;
+        if (typeof data.y === 'number') droneState.y = data.y;
+        if (typeof data.z === 'number') droneState.z = data.z;
+        if (typeof data.yaw === 'number') droneState.yaw = data.yaw;
+        if (typeof data.pitch === 'number') droneState.pitch = data.pitch;
+        if (typeof data.roll === 'number') droneState.roll = data.roll;
+        if (typeof data.visualPitch === 'number') droneState.visualPitch = data.visualPitch;
+        if (typeof data.visualRoll === 'number') droneState.visualRoll = data.visualRoll;
+        if (typeof data.gimbalPitch === 'number') droneState.gimbalPitch = data.gimbalPitch;
+        if (typeof data.cameraMode === 'string') droneState.cameraMode = data.cameraMode;
+        if (typeof data.flying === 'boolean') droneState.flying = data.flying;
+        if (typeof data.battery === 'number') droneState.battery = data.battery;
+        if (typeof data.isArmed === 'boolean') droneState.isArmed = data.isArmed;
+        if (typeof data.status === 'string') droneState.status = data.status;
+
+        // Atualização básica da câmera para Etapa 1
+        updateCameraEtapa1();
+      };
+
+      function updateCameraEtapa1() {
+        var droneX = droneState.x;
+        var droneY = droneState.z; // Y é altura no Three.js
+        var droneZ = -droneState.y; // Z negativo é Norte no Three.js
+
+        var yawRad = -(droneState.yaw * Math.PI / 180.0);
+        var pitchRad = (droneState.visualPitch + droneState.gimbalPitch) * Math.PI / 180.0;
+        var rollRad = -(droneState.visualRoll * Math.PI / 180.0);
+
+        if (droneState.cameraMode === 'thirdPerson') {
+          var dist = 4.5;
+          var height = 1.8;
+          var camX = droneX + Math.sin(yawRad) * dist;
+          var camY = Math.max(0.5, droneY + height);
+          var camZ = droneZ + Math.cos(yawRad) * dist;
+          camera.position.set(camX, camY, camZ);
+          camera.lookAt(droneX, droneY + 0.5, droneZ);
+        } else {
+          camera.position.set(droneX, Math.max(0.2, droneY + 0.1), droneZ);
+          camera.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
+        }
+      }
+
+      // ── Loop de Renderização ──
+      function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // ── Redimensionamento Responsivo ──
+      window.addEventListener('resize', function () {
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      console.log('Ambiente 3D inicializado com sucesso.');
+    })();
+  </script>
+</body>
+</html>
