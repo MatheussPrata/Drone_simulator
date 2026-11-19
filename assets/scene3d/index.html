@@ -199,6 +199,40 @@
       gridHelper.position.y = 0.02;
       scene.add(gridHelper);
 
+      // ── Espelho d'água da represa (visível só no cenário Cânion & Represa) ──
+      var waterGeo = new THREE.PlaneGeometry(900, 560);
+      waterGeo.rotateX(-Math.PI / 2);
+      var waterMat = new THREE.MeshStandardMaterial({
+        color: 0x1d6f8f,
+        transparent: true,
+        opacity: 0.88,
+        roughness: 0.12,
+        metalness: 0.45
+      });
+      var waterMesh = new THREE.Mesh(waterGeo, waterMat);
+      waterMesh.position.set(0, 0.07, 280);
+      waterMesh.receiveShadow = true;
+      waterMesh.visible = false;
+      scene.add(waterMesh);
+
+      /// Aplica céu, neblina, cor do solo e água do cenário escolhido.
+      function applyScenarioTheme(theme) {
+        if (!theme) return;
+        var skyColor = new THREE.Color(theme.sky || '#8cb5df');
+        scene.background = skyColor;
+        if (scene.fog) {
+          scene.fog.color.copy(skyColor);
+          if (typeof theme.fogDensity === 'number') {
+            scene.fog.density = theme.fogDensity;
+          }
+        }
+        if (ground && ground.material) {
+          ground.material.color.set(theme.ground || '#ffffff');
+          ground.material.needsUpdate = true;
+        }
+        waterMesh.visible = !!theme.water;
+      }
+
       // ── Heliponto Home (0, 0, 0) com "H" Amarelo e Balizamento ──
       function createHelipad() {
         var helipadGroup = new THREE.Group();
@@ -467,6 +501,22 @@
               break;
           }
         });
+      };
+
+      /// Recarrega o cenário completo (tema do terreno/céu/água + obstáculos).
+      window.loadMapScenario = function (payload) {
+        var data = payload;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            console.error('Falha ao interpretar o cenário:', e);
+            return;
+          }
+        }
+        if (!data) return;
+        applyScenarioTheme(data.theme);
+        window.loadWorldObstacles(data);
       };
 
       // ── Barreira Geofence e Zonas No-Fly ──

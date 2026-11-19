@@ -51,10 +51,42 @@ class WorldGenerator {
     return obstacles;
   }
 
-  /// Serializa a planta para envio ao WebView.
+  /// Serializa a planta + tema visual para envio ao WebView.
   static String obstaclesJson(FlightMap map) {
+    final scenario = scenarioFor(map);
     final list = generateFor(map).map((o) => o.toJson()).toList();
-    return jsonEncode({'scenario': scenarioFor(map).name, 'obstacles': list});
+    return jsonEncode({
+      'scenario': scenario.name,
+      'theme': themeFor(scenario),
+      'obstacles': list,
+    });
+  }
+
+  /// Paleta do terreno, céu e neblina de cada cenário.
+  static Map<String, dynamic> themeFor(WorldScenario scenario) {
+    switch (scenario) {
+      case WorldScenario.urban:
+        return {
+          'sky': '#8cb5df',
+          'fogDensity': 0.0015,
+          'ground': '#ffffff',
+          'water': false,
+        };
+      case WorldScenario.forest:
+        return {
+          'sky': '#9dc3d6',
+          'fogDensity': 0.0024,
+          'ground': '#cfe8bd',
+          'water': false,
+        };
+      case WorldScenario.canyon:
+        return {
+          'sky': '#e2cdae',
+          'fogDensity': 0.0018,
+          'ground': '#c9b48c',
+          'water': true,
+        };
+    }
   }
 
   // ────────────────────────────────────────────────────────────

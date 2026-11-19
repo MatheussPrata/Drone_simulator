@@ -6,7 +6,7 @@ import 'package:drone_simulator/models/drone_state.dart';
 
 void main() {
   group('FlightMap Modeling Tests', () {
-    test('Drone Park default map has optimal 500m radius and 120m altitude ceiling', () {
+    test('Distrito Urbano tem raio de 500m, teto de 120m e nome fiel ao cenário', () {
       final map = FlightMap.dronePark;
       expect(map.radiusMeters, 500.0);
       expect(map.warningRadiusMeters, 450.0);
@@ -26,21 +26,25 @@ void main() {
     test('Available maps list contains all three modeled arenas', () {
       final maps = FlightMap.availableMaps;
       expect(maps.length, 3);
-      expect(maps.any((m) => m.id == 'drone_park'), true);
-      expect(maps.any((m) => m.id == 'aeroclube'), true);
-      expect(maps.any((m) => m.id == 'fpv_arena'), true);
+      expect(maps.any((m) => m.id == 'distrito_urbano'), true);
+      expect(maps.any((m) => m.id == 'parque_florestal'), true);
+      expect(maps.any((m) => m.id == 'canion_represa'), true);
+      expect(maps.map((m) => m.name).toList(),
+          ['Distrito Urbano', 'Parque Florestal', 'Cânion & Represa']);
     });
 
-    test('FPV Arena is modeled as a compact fast-paced arena (300m)', () {
-      final arena = FlightMap.fpvArena;
-      expect(arena.radiusMeters, 300.0);
-      expect(arena.maxAltitudeMeters, 60.0);
-      expect(arena.pois.length, 6); // 6 gates
+    test('Cânion & Represa é modelado com 500m de raio e teto de 120m', () {
+      final canyon = FlightMap.fpvArena;
+      expect(canyon.name, 'Cânion & Represa');
+      expect(canyon.radiusMeters, 500.0);
+      expect(canyon.warningRadiusMeters, 450.0);
+      expect(canyon.maxAltitudeMeters, 120.0);
+      expect(canyon.pois.length, 6); // pórticos sobre a represa
     });
 
     test('Physics engine enforces Geofence and altitude ceiling of active map', () {
       final engine = FlightPhysicsEngine(initialMap: FlightMap.dronePark);
-      expect(engine.state.activeMap.id, 'drone_park');
+      expect(engine.state.activeMap.id, 'distrito_urbano');
       expect(engine.state.altitude, 0.0);
       expect(engine.state.isGeofenceBreach, false);
 
@@ -51,8 +55,8 @@ void main() {
 
       // Select another map
       engine.selectMap(FlightMap.fpvArena);
-      expect(engine.state.activeMap.id, 'fpv_arena');
-      expect(engine.state.activeMap.radiusMeters, 300.0);
+      expect(engine.state.activeMap.id, 'canion_represa');
+      expect(engine.state.activeMap.radiusMeters, 500.0);
     });
 
     test('GeoMath calculations for map scale are accurate', () {

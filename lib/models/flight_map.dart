@@ -124,56 +124,6 @@ class FlightMap {
   }
 
   // ────────────────────────────────────────────────────────────
-  // Locais Pré-Definidos de Decolagem (Paranavaí e Região)
-  // ────────────────────────────────────────────────────────────
-
-  /// Paranavaí - Centro (Praça dos Pioneiros / Área Urbana)
-  static final FlightMap paranavaiCentro = FlightMap(
-    id: 'paranavai_centro',
-    name: 'Paranavaí - Centro',
-    description: 'Área urbana central ao redor da Praça dos Pioneiros.',
-    center: const LatLng(-23.0825, -52.4639),
-    homePosition: const LatLng(-23.0825, -52.4639),
-    radiusMeters: 500.0,
-    warningRadiusMeters: 450.0,
-    maxAltitudeMeters: 120.0,
-    initialZoom: 16.5,
-  );
-
-  /// Parque / Área Verde (Parque Ouro Branco / Bosque)
-  static final FlightMap paranavaiParque = FlightMap(
-    id: 'paranavai_parque',
-    name: 'Parque / Área Verde',
-    description: 'Área verde arborizada ideal para voo livre e manobras visuais.',
-    center: const LatLng(-23.0760, -52.4550),
-    homePosition: const LatLng(-23.0760, -52.4550),
-    radiusMeters: 500.0,
-    warningRadiusMeters: 450.0,
-    maxAltitudeMeters: 120.0,
-    initialZoom: 16.5,
-  );
-
-  /// Represa / Lago (Parque das Nações / Espelho D'água)
-  static final FlightMap paranavaiRepresa = FlightMap(
-    id: 'paranavai_represa',
-    name: 'Represa / Lago',
-    description: 'Espelho d’água e área aberta para voos panorâmicos de longa distância.',
-    center: const LatLng(-23.0910, -52.4720),
-    homePosition: const LatLng(-23.0910, -52.4720),
-    radiusMeters: 500.0,
-    warningRadiusMeters: 450.0,
-    maxAltitudeMeters: 120.0,
-    initialZoom: 16.5,
-  );
-
-  /// Lista dos 3 locais pré-definidos de decolagem
-  static List<FlightMap> get predefinedTakeoffLocations => [
-        paranavaiCentro,
-        paranavaiParque,
-        paranavaiRepresa,
-      ];
-
-  // ────────────────────────────────────────────────────────────
   // Cenários modelados prontos com dimensões ideais de voo
   // ────────────────────────────────────────────────────────────
 
@@ -189,9 +139,9 @@ class FlightMap {
     final windsockPos = GeoMath.offsetByMeters(center, 40, 40);
 
     return FlightMap(
-      id: 'drone_park',
-      name: 'Drone Park (Campo Aberto)',
-      description: 'Área aberta de 1 km² ideal para treino geral, acrobacias e missões autônomas.',
+      id: 'distrito_urbano',
+      name: 'Distrito Urbano',
+      description: 'Quarteirões com prédios de 20m a 85m, avenidas asfaltadas, torre de rádio e heliponto central.',
       center: center,
       homePosition: center,
       radiusMeters: 500.0,
@@ -246,42 +196,33 @@ class FlightMap {
     );
   }();
 
-  /// 2. Aeroclube & Pista (600m de raio / 1.4 km²)
+  /// 2. Parque Florestal (500m de raio / 1 km²)
   static final FlightMap aeroclube = () {
     const center = LatLng(-23.5080, -46.6380);
     final p1 = GeoMath.offsetByMeters(center, -300, 0);
     final p2 = GeoMath.offsetByMeters(center, 300, 0);
-    final nfzRunway = GeoMath.offsetByMeters(center, 0, -350);
 
     return FlightMap(
-      id: 'aeroclube',
-      name: 'Aeroclube & Pistas',
-      description: 'Pista estendida para testes de alta velocidade e trajetórias longas.',
+      id: 'parque_florestal',
+      name: 'Parque Florestal',
+      description: 'Terreno gramado amplo, trilhas de terra, bosque denso e clareira de decolagem.',
       center: center,
       homePosition: center,
-      radiusMeters: 600.0,
-      warningRadiusMeters: 500.0,
+      radiusMeters: 500.0,
+      warningRadiusMeters: 450.0,
       maxAltitudeMeters: 120.0,
       initialZoom: 16.0,
-      noFlyZones: [
-        NoFlyZone(
-          id: 'nfz_commercial',
-          name: 'Pista Comercial Ativa',
-          center: nfzRunway,
-          radiusMeters: 120.0,
-          reason: 'Aproximação de aeronaves tripuladas.',
-        ),
-      ],
+      noFlyZones: const [],
       pois: [
-        MapPoi(id: 'rw_09', name: 'Cabeceira 09', position: p1, type: PoiType.landingPad, altitudeMeters: 0, label: '09'),
-        MapPoi(id: 'rw_27', name: 'Cabeceira 27', position: p2, type: PoiType.landingPad, altitudeMeters: 0, label: '27'),
-        MapPoi(id: 'hangar', name: 'Hangar Principal', position: GeoMath.offsetByMeters(center, 0, 150), type: PoiType.obstacle, altitudeMeters: 18, label: 'Hangar'),
+        MapPoi(id: 'clearing', name: 'Clareira de Decolagem', position: center, type: PoiType.landingPad, altitudeMeters: 0, label: 'Clareira'),
+        MapPoi(id: 'trail_n', name: 'Trilha Norte', position: p1, type: PoiType.windsock, altitudeMeters: 0, label: 'Norte'),
+        MapPoi(id: 'trail_s', name: 'Trilha Sul', position: p2, type: PoiType.windsock, altitudeMeters: 0, label: 'Sul'),
       ],
       presetMissions: [
         PresetMission(
           id: 'runway_run',
-          name: 'Voo Longitudinal da Pista',
-          description: 'Passagem baixa pelas cabeceiras da pista de testes.',
+          name: 'Travessia do Bosque',
+          description: 'Voo baixo entre as trilhas da floresta, contornando o arvoredo.',
           waypoints: [
             Waypoint(id: 1, position: p1, targetAltitude: 15.0, hoverSeconds: 2.0),
             Waypoint(id: 2, position: p2, targetAltitude: 15.0, hoverSeconds: 2.0),
@@ -292,7 +233,7 @@ class FlightMap {
     );
   }();
 
-  /// 3. FPV Racing Arena (Raio de 300m - Circuito Compacto de Alta Velocidade)
+  /// 3. Cânion & Represa (500m de raio / 1 km²)
   static final FlightMap fpvArena = () {
     const center = LatLng(-23.5420, -46.7150);
     final g1 = GeoMath.offsetByMeters(center, -80, 60);
@@ -303,15 +244,15 @@ class FlightMap {
     final g6 = GeoMath.offsetByMeters(center, -110, -10);
 
     return FlightMap(
-      id: 'fpv_arena',
-      name: 'FPV Racing Arena',
-      description: 'Arena compacta de 300m com gates técnicos para treino ágil de drones FPV.',
+      id: 'canion_represa',
+      name: 'Cânion & Represa',
+      description: 'Grande espelho d\'água, barragem de concreto, pilares de ponte e rochas nas bordas.',
       center: center,
       homePosition: center,
-      radiusMeters: 300.0,
-      warningRadiusMeters: 240.0,
-      maxAltitudeMeters: 60.0,
-      initialZoom: 17.5,
+      radiusMeters: 500.0,
+      warningRadiusMeters: 450.0,
+      maxAltitudeMeters: 120.0,
+      initialZoom: 16.5,
       pois: [
         MapPoi(id: 'g1', name: 'Gate 1', position: g1, type: PoiType.gate, altitudeMeters: 8, label: '1'),
         MapPoi(id: 'g2', name: 'Gate 2', position: g2, type: PoiType.gate, altitudeMeters: 8, label: '2'),
@@ -323,8 +264,8 @@ class FlightMap {
       presetMissions: [
         PresetMission(
           id: 'fpv_slalom',
-          name: 'Circuito FPV 6-Gates',
-          description: 'Traçado técnico completo de velocidade pelos 6 portões.',
+          name: 'Travessia dos Pilares',
+          description: 'Passagem sobre a represa desviando dos pilares da ponte.',
           waypoints: [
             Waypoint(id: 1, position: g1, targetAltitude: 10.0, hoverSeconds: 0.5),
             Waypoint(id: 2, position: g2, targetAltitude: 10.0, hoverSeconds: 0.5),
@@ -342,4 +283,8 @@ class FlightMap {
   static const List<FlightMap> all = []; // will be filled via getter
 
   static List<FlightMap> get availableMaps => [dronePark, aeroclube, fpvArena];
+
+  /// Lista dos 3 cenários temáticos de decolagem (sem nomes de cidades reais).
+  static List<FlightMap> get predefinedTakeoffLocations =>
+      [dronePark, aeroclube, fpvArena];
 }

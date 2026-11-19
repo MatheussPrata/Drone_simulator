@@ -87,8 +87,8 @@ class _World3dViewState extends State<World3dView> {
     _syncStateTo3d();
   }
 
-  /// Envia a planta de obstáculos do mapa ativo (fonte única gerada em Dart)
-  /// sempre que o cenário muda, mantendo 3D e colisão perfeitamente alinhados.
+  /// Envia o cenário (tema do terreno + planta de obstáculos) do mapa ativo
+  /// sempre que ele muda, mantendo 3D e colisão perfeitamente alinhados.
   void _pushObstacleLayout() {
     if (_webViewController == null) return;
     final map = widget.controller.activeMap;
@@ -97,7 +97,7 @@ class _World3dViewState extends State<World3dView> {
 
     final json = WorldGenerator.obstaclesJson(map).replaceAll("'", "\\'");
     _webViewController!
-        .runJavaScript("window.loadWorldObstacles('$json');")
+        .runJavaScript("window.loadMapScenario('$json');")
         .catchError((Object error) {
       debugPrint('Erro ao enviar obstáculos ao WebView: $error');
     });

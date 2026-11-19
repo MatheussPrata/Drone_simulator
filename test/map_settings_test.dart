@@ -30,25 +30,36 @@ void main() {
       controller.dispose();
     });
 
-    test('3 locais pré-definidos de decolagem em Paranavaí estão modelados corretamente', () {
+    test('3 cenários temáticos estão modelados com nomes fiéis ao cenário 3D', () {
       final locations = FlightMap.predefinedTakeoffLocations;
       expect(locations.length, 3);
 
-      final centro = locations.firstWhere((l) => l.id == 'paranavai_centro');
-      expect(centro.name, contains('Centro'));
-      expect(centro.radiusMeters, 500.0);
-      expect(centro.maxAltitudeMeters, 120.0);
-      expect(centro.homePosition.latitude, closeTo(-23.0825, 0.001));
+      expect(locations.map((l) => l.name).toList(),
+          ['Distrito Urbano', 'Parque Florestal', 'Cânion & Represa']);
 
-      final parque = locations.firstWhere((l) => l.id == 'paranavai_parque');
-      expect(parque.name, contains('Parque'));
-      expect(parque.radiusMeters, 500.0);
-      expect(parque.homePosition.latitude, closeTo(-23.0760, 0.001));
+      final urbano = locations.firstWhere((l) => l.id == 'distrito_urbano');
+      expect(urbano.name, 'Distrito Urbano');
+      expect(urbano.radiusMeters, 500.0);
+      expect(urbano.maxAltitudeMeters, 120.0);
+      expect(urbano.noFlyZones.isNotEmpty, true);
 
-      final represa = locations.firstWhere((l) => l.id == 'paranavai_represa');
-      expect(represa.name, contains('Represa'));
-      expect(represa.radiusMeters, 500.0);
-      expect(represa.homePosition.latitude, closeTo(-23.0910, 0.001));
+      final floresta = locations.firstWhere((l) => l.id == 'parque_florestal');
+      expect(floresta.name, 'Parque Florestal');
+      expect(floresta.radiusMeters, 500.0);
+      expect(floresta.noFlyZones, isEmpty);
+
+      final canion = locations.firstWhere((l) => l.id == 'canion_represa');
+      expect(canion.name, 'Cânion & Represa');
+      expect(canion.radiusMeters, 500.0);
+    });
+
+    test('Nenhum mapa usa nome de cidade real', () {
+      for (final map in FlightMap.predefinedTakeoffLocations) {
+        expect(map.name.toLowerCase().contains('paranavaí'), false);
+        expect(map.name.toLowerCase().contains('paranavai'), false);
+        expect(map.name.toLowerCase().contains('são paulo'), false);
+        expect(map.name.toLowerCase().contains('sao paulo'), false);
+      }
     });
 
     test('Critério de aceite: Selecionar local de decolagem redefine o ponto Home e reseta o voo', () {
@@ -61,12 +72,12 @@ void main() {
       expect(controller.z, equals(15.0));
       expect(controller.isLanded, isFalse);
 
-      // Seleciona Paranavaí - Centro
-      final novoLocal = FlightMap.paranavaiCentro;
+      // Seleciona o Distrito Urbano
+      final novoLocal = FlightMap.dronePark;
       controller.selectTakeoffLocation(novoLocal);
 
       // Verifica se o mapa ativo e Home foram redefinidos
-      expect(controller.activeMap.id, equals('paranavai_centro'));
+      expect(controller.activeMap.id, equals('distrito_urbano'));
       expect(controller.activeMap.homePosition, equals(novoLocal.homePosition));
 
       // Verifica se o voo foi resetado para Home (0,0,0) e pousado
@@ -111,7 +122,7 @@ void main() {
       controller.dispose();
     });
 
-    testWidgets('MapSettingsModal exibe os 3 locais de Paranavaí e permite seleção', (tester) async {
+    testWidgets('MapSettingsModal exibe os 3 cenários temáticos e permite seleção', (tester) async {
       final controller = SimulatorController();
 
       await tester.pumpWidget(
@@ -123,22 +134,26 @@ void main() {
       );
       await tester.pump();
 
-      // Verifica os 3 locais de decolagem
-      expect(find.byKey(const Key('loc_paranavai_centro')), findsOneWidget);
-      expect(find.byKey(const Key('loc_paranavai_parque')), findsOneWidget);
-      expect(find.byKey(const Key('loc_paranavai_represa')), findsOneWidget);
+      // Verifica os 3 cenários de decolagem
+      expect(find.byKey(const Key('loc_distrito_urbano')), findsOneWidget);
+      expect(find.byKey(const Key('loc_parque_florestal')), findsOneWidget);
+      expect(find.byKey(const Key('loc_canion_represa')), findsOneWidget);
 
-      // Seleciona Parque / Área Verde
-      await tester.tap(find.byKey(const Key('loc_paranavai_parque')));
+      expect(find.text('Distrito Urbano'), findsWidgets);
+      expect(find.text('Parque Florestal'), findsWidgets);
+      expect(find.text('Cânion & Represa'), findsWidgets);
+
+      // Seleciona Parque Florestal
+      await tester.tap(find.byKey(const Key('loc_parque_florestal')));
       await tester.pump();
 
-      expect(controller.activeMap.id, equals('paranavai_parque'));
+      expect(controller.activeMap.id, equals('parque_florestal'));
 
-      // Seleciona Represa / Lago
-      await tester.tap(find.byKey(const Key('loc_paranavai_represa')));
+      // Seleciona Cânion & Represa
+      await tester.tap(find.byKey(const Key('loc_canion_represa')));
       await tester.pump();
 
-      expect(controller.activeMap.id, equals('paranavai_represa'));
+      expect(controller.activeMap.id, equals('canion_represa'));
 
       controller.dispose();
     });
