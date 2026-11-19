@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:drone_simulator/main.dart';
 import 'package:drone_simulator/models/drone_state.dart';
-import 'package:drone_simulator/widgets/chase_drone_overlay.dart';
 import 'package:drone_simulator/widgets/fpv_camera_view.dart';
 import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
+import 'package:drone_simulator/widgets/world_3d_view.dart';
 
 void main() {
-  group('Etapa 5 - Ajustar Câmera/OSD para 3ª Pessoa e Integração Final', () {
+  group('Etapa 5 - Ajustar Câmera/OSD para 3ª Pessoa e Integração Final 3D', () {
     testWidgets('FpvCameraView: ajusta pitch (-12°) e atenua roll (0.4) em 3ª Pessoa', (tester) async {
       // 1. Câmera em 1ª Pessoa (FPV)
       await tester.pumpWidget(
@@ -98,12 +98,12 @@ void main() {
       expect(painterThird.showTopCompass, isTrue);
     });
 
-    testWidgets('Integração Main: alternar para 3ª Pessoa exibe ChaseDroneOverlay na tela principal', (tester) async {
+    testWidgets('Integração Main: World3dView permanece na tela principal e alternar câmera funciona', (tester) async {
       await tester.pumpWidget(const DroneSimulatorApp());
       await tester.pump();
 
-      // Inicialmente em FPV -> ChaseDroneOverlay NÃO deve estar na árvore
-      expect(find.byType(ChaseDroneOverlay), findsNothing);
+      // World3dView DEVE estar na árvore principal
+      expect(find.byType(World3dView), findsOneWidget);
 
       // Clica no botão de alternar câmera no TelemetryHud
       final toggleCameraFinder = find.byKey(const Key('btn_camera_mode'));
@@ -112,25 +112,24 @@ void main() {
       await tester.tap(toggleCameraFinder);
       await tester.pump();
 
-      // Agora em 3ª Pessoa -> ChaseDroneOverlay DEVE estar visível
-      expect(find.byType(ChaseDroneOverlay), findsOneWidget);
+      // Continua com World3dView ativo no modo 3ª pessoa
+      expect(find.byType(World3dView), findsOneWidget);
 
       // Alterna de volta para FPV
       await tester.tap(toggleCameraFinder);
       await tester.pump();
 
-      // Retorna para FPV -> ChaseDroneOverlay removido
-      expect(find.byType(ChaseDroneOverlay), findsNothing);
+      expect(find.byType(World3dView), findsOneWidget);
     });
 
-    testWidgets('Decolagem e voo em 3ª Pessoa mantêm rendering 60FPS estável sem exceções', (tester) async {
+    testWidgets('Decolagem e voo com World3dView mantêm rendering 60FPS estável sem exceções', (tester) async {
       await tester.pumpWidget(const DroneSimulatorApp());
       await tester.pump();
 
       // Alterna para 3ª pessoa
       await tester.tap(find.byKey(const Key('btn_camera_mode')));
       await tester.pump();
-      expect(find.byType(ChaseDroneOverlay), findsOneWidget);
+      expect(find.byType(World3dView), findsOneWidget);
 
       // Decolar
       final takeoffBtn = find.byKey(const Key('action_takeoff'));
@@ -144,7 +143,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
       }
 
-      expect(find.byType(ChaseDroneOverlay), findsOneWidget);
+      expect(find.byType(World3dView), findsOneWidget);
     });
   });
 }

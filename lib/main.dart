@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
-import 'package:drone_simulator/widgets/chase_drone_overlay.dart';
-import 'package:drone_simulator/widgets/fpv_camera_view.dart';
 import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
 import 'package:drone_simulator/widgets/gimbal_slider.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/minimap_pip.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 import 'package:drone_simulator/widgets/virtual_joystick.dart';
+import 'package:drone_simulator/widgets/world_3d_view.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,23 +77,18 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Camada 1: Visão Principal (FPV 3D com OSD estilo DJI ou Mapa Real) ──
+          // ── Camada 1: Visão Principal (Cenário 3D Three.js com OSD estilo DJI ou Mapa Real) ──
           Positioned.fill(
             child: _isFpvMain
                 ? Stack(
                     fit: StackFit.expand,
                     children: [
-                      FpvCameraView(
+                      World3dView(
                         controller: _controller,
-                        showOsd: false,
                       ),
                       FpvOsdOverlay(
                         controller: _controller,
                       ),
-                      if (_controller.cameraMode == CameraViewMode.thirdPerson)
-                        ChaseDroneOverlay(
-                          controller: _controller,
-                        ),
                     ],
                   )
                 : MiniMapWidget(

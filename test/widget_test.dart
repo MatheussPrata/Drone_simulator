@@ -7,6 +7,7 @@ import 'package:drone_simulator/widgets/gimbal_slider.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/telemetry_hud.dart';
 import 'package:drone_simulator/widgets/virtual_joystick.dart';
+import 'package:drone_simulator/widgets/world_3d_view.dart';
 
 void main() {
   group('Etapa 5 - Layout Estilo DJI Fly e Alternância PiP', () {
@@ -21,8 +22,8 @@ void main() {
       expect(find.text('THROTTLE / YAW'), findsOneWidget);
       expect(find.text('PITCH / ROLL'), findsOneWidget);
 
-      // FPV 3D e OSD ocupando tela cheia por padrão
-      expect(find.byType(FpvCameraView), findsOneWidget);
+      // 3D World e OSD ocupando tela cheia por padrão
+      expect(find.byType(World3dView), findsOneWidget);
       expect(find.byType(FpvOsdOverlay), findsOneWidget);
 
       // Mini-Mapa no card PiP no canto inferior esquerdo
