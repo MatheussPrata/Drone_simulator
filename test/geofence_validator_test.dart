@@ -75,9 +75,9 @@ void main() {
       engine.takeoff();
       expect(engine.state.flightMode, FlightMode.hover);
 
-      // Acelera o drone para o Norte por 20 segundos de simulação física
+      // Acelera o drone para o Norte por tempo suficiente para alcançar e tentar ultrapassar os 500m
       engine.setManualInput(0.0, 0.0, 1.0, 0.0); // Pitch para frente (norte)
-      for (int i = 0; i < 400; i++) {
+      for (int i = 0; i < 1200; i++) {
         engine.tick(0.05);
       }
 
