@@ -48,16 +48,23 @@ class FlightSimulatorScreen extends StatefulWidget {
 
 class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   late final SimulatorController _controller;
-  bool _isFpvMain = true; // Visão FPV como tela cheia principal por padrão
+
+  bool get _isFpvMain => !_controller.isMapPrimaryView;
 
   @override
   void initState() {
     super.initState();
     _controller = SimulatorController()..start();
+    _controller.addListener(_onControllerTick);
+  }
+
+  void _onControllerTick() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerTick);
     _controller.dispose();
     super.dispose();
   }
@@ -96,11 +103,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
             bottom: 155, // Posicionada de forma limpa acima do joystick esquerdo
             child: GestureDetector(
               key: const Key('pip_card_gesture'),
-              onTap: () {
-                setState(() {
-                  _isFpvMain = !_isFpvMain;
-                });
-              },
+              onTap: () => _controller.togglePrimaryView(),
               child: Container(
                 width: 156,
                 height: 104,
@@ -142,11 +145,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                         right: 5,
                         child: GestureDetector(
                           key: const Key('pip_swap_button'),
-                          onTap: () {
-                            setState(() {
-                              _isFpvMain = !_isFpvMain;
-                            });
-                          },
+                          onTap: () => _controller.togglePrimaryView(),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(

@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:drone_simulator/simulation/flight_physics.dart';
 
+export 'package:drone_simulator/models/drone_state.dart' show CameraViewMode;
+
 /// Status operacional do simulador de voo
 enum SimulatorStatus {
   disarmed,
@@ -36,6 +38,8 @@ class SimulatorController extends ChangeNotifier {
   double _yaw = 0.0;
   double _battery = 100.0;
   bool _isArmed = false;
+  CameraViewMode _cameraMode = CameraViewMode.fpv;
+  bool _isMapPrimaryView = false;
 
   double _manualThrottle = 0.0;
   double _manualYaw = 0.0;
@@ -54,6 +58,8 @@ class SimulatorController extends ChangeNotifier {
   double get gimbalPitch => physics.gimbalPitch;
   double get visualPitch => physics.visualPitch;
   double get visualRoll => physics.visualRoll;
+  CameraViewMode get cameraMode => _cameraMode;
+  bool get isMapPrimaryView => _isMapPrimaryView;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
   bool get isHovering => _status == SimulatorStatus.hovering;
@@ -61,6 +67,36 @@ class SimulatorController extends ChangeNotifier {
   bool get isRTH => _status == SimulatorStatus.rth;
   bool get isLanding => _status == SimulatorStatus.landing;
   bool get isRunning => _timer != null;
+
+  /// Alterna o modo de câmera entre 1ª Pessoa (FPV) e 3ª Pessoa
+  void toggleCameraMode() {
+    _cameraMode = _cameraMode == CameraViewMode.fpv
+        ? CameraViewMode.thirdPerson
+        : CameraViewMode.fpv;
+    notifyListeners();
+  }
+
+  /// Define explicitamente o modo de câmera
+  void setCameraMode(CameraViewMode mode) {
+    if (_cameraMode != mode) {
+      _cameraMode = mode;
+      notifyListeners();
+    }
+  }
+
+  /// Alterna a visão principal entre a Câmera e o Mapa em tela cheia
+  void togglePrimaryView() {
+    _isMapPrimaryView = !_isMapPrimaryView;
+    notifyListeners();
+  }
+
+  /// Define se o mapa é a visão primária em tela cheia
+  void setMapPrimaryView(bool isPrimary) {
+    if (_isMapPrimaryView != isPrimary) {
+      _isMapPrimaryView = isPrimary;
+      notifyListeners();
+    }
+  }
 
   /// Inicia o loop de atualização a 60 FPS
   void start() {
@@ -121,6 +157,8 @@ class SimulatorController extends ChangeNotifier {
     _manualRoll = 0.0;
     _battery = 100.0;
     _isArmed = false;
+    _cameraMode = CameraViewMode.fpv;
+    _isMapPrimaryView = false;
     physics.resetBattery();
     physics.selectMap(physics.activeMap);
     notifyListeners();

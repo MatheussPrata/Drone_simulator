@@ -34,7 +34,9 @@ class TelemetryHud extends StatelessWidget {
   final VoidCallback? onLand;
   final VoidCallback? onRth;
   final VoidCallback? onReset;
+  final VoidCallback? onToggleCameraMode;
 
+  final CameraViewMode cameraMode;
   final SimulatorController? controller;
   final HudActionsPlacement actionsPlacement;
 
@@ -51,6 +53,8 @@ class TelemetryHud extends StatelessWidget {
     this.onLand,
     this.onRth,
     this.onReset,
+    this.onToggleCameraMode,
+    this.cameraMode = CameraViewMode.fpv,
     this.controller,
     this.actionsPlacement = HudActionsPlacement.top,
   });
@@ -73,12 +77,14 @@ class TelemetryHud extends StatelessWidget {
             curSpeed: spd,
             curDist: dist,
             curBattery: c.battery,
+            curCameraMode: c.cameraMode,
             curGeofenceWarn: isGeofenceWarning || geofenceWarn,
             curNoFlyWarn: isNoFlyWarning || noFlyWarn,
             takeoffCb: onTakeoff ?? (c.isLanded ? c.armAndTakeoff : null),
             landCb: onLand ?? (!c.isLanded ? c.land : null),
             rthCb: onRth ?? (!c.isLanded ? c.triggerRTH : null),
             resetCb: onReset ?? c.reset,
+            toggleCameraCb: onToggleCameraMode ?? c.toggleCameraMode,
           );
         },
       );
@@ -90,12 +96,14 @@ class TelemetryHud extends StatelessWidget {
       curSpeed: speed,
       curDist: distanceToHome,
       curBattery: battery,
+      curCameraMode: cameraMode,
       curGeofenceWarn: isGeofenceWarning,
       curNoFlyWarn: isNoFlyWarning,
       takeoffCb: onTakeoff,
       landCb: onLand,
       rthCb: onRth,
       resetCb: onReset,
+      toggleCameraCb: onToggleCameraMode,
     );
   }
 
@@ -105,12 +113,14 @@ class TelemetryHud extends StatelessWidget {
     required double curSpeed,
     required double curDist,
     required double curBattery,
+    required CameraViewMode curCameraMode,
     required bool curGeofenceWarn,
     required bool curNoFlyWarn,
     required VoidCallback? takeoffCb,
     required VoidCallback? landCb,
     required VoidCallback? rthCb,
     required VoidCallback? resetCb,
+    required VoidCallback? toggleCameraCb,
   }) {
     return SafeArea(
       bottom: false,
@@ -171,14 +181,25 @@ class TelemetryHud extends StatelessWidget {
                   ],
                 ),
 
-                // Grupo de Ações de Voo (quando posicionados no topo)
+                // Grupo de Modo de Câmera e Ações de Voo (quando posicionados no topo)
                 if (actionsPlacement == HudActionsPlacement.top)
-                  FlightActionButtons(
-                    onTakeoff: takeoffCb,
-                    onLand: landCb,
-                    onRth: rthCb,
-                    onReset: resetCb,
-                    orientation: Axis.horizontal,
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _buildCameraModeButton(
+                        cameraMode: curCameraMode,
+                        onToggle: toggleCameraCb,
+                      ),
+                      FlightActionButtons(
+                        onTakeoff: takeoffCb,
+                        onLand: landCb,
+                        onRth: rthCb,
+                        onReset: resetCb,
+                        orientation: Axis.horizontal,
+                      ),
+                    ],
                   ),
               ],
             ),
@@ -198,6 +219,56 @@ class TelemetryHud extends StatelessWidget {
               message: warningMessage ?? 'ALERTA: LIMITE MÁXIMO DE GEOFENCE (500M) PRÓXIMO!',
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCameraModeButton({
+    required CameraViewMode cameraMode,
+    required VoidCallback? onToggle,
+  }) {
+    final isFpv = cameraMode == CameraViewMode.fpv;
+    final label = isFpv ? '1ª Pessoa (FPV)' : '3ª Pessoa';
+    final icon = isFpv ? Icons.videocam : Icons.accessibility_new;
+    final isEnabled = onToggle != null;
+    const color = Colors.cyanAccent;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('btn_camera_mode'),
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isEnabled ? color.withOpacity(0.18) : Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isEnabled ? color.withOpacity(0.6) : Colors.white24,
+              width: 1.0,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isEnabled ? color : Colors.white38,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isEnabled ? color : Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -4,6 +4,8 @@ import 'flight_map.dart';
 
 enum FlightMode { disarmed, hover, manual, autoMission, rtl, landing }
 
+enum CameraViewMode { fpv, thirdPerson }
+
 class DroneState {
   final LatLng position;
   final LatLng homePosition;
@@ -30,6 +32,7 @@ class DroneState {
   final bool inNoFlyZone;
   final bool isNoFlyWarning;
   final String? currentNfzName;
+  final CameraViewMode cameraMode;
 
   const DroneState({
     required this.position,
@@ -57,6 +60,7 @@ class DroneState {
     this.inNoFlyZone = false,
     this.isNoFlyWarning = false,
     this.currentNfzName,
+    this.cameraMode = CameraViewMode.fpv,
   });
 
   DroneState copyWith({
@@ -85,6 +89,7 @@ class DroneState {
     bool? inNoFlyZone,
     bool? isNoFlyWarning,
     String? currentNfzName,
+    CameraViewMode? cameraMode,
   }) {
     return DroneState(
       position: position ?? this.position,
@@ -112,6 +117,7 @@ class DroneState {
       inNoFlyZone: inNoFlyZone ?? isNoFlyWarning ?? this.inNoFlyZone,
       isNoFlyWarning: isNoFlyWarning ?? inNoFlyZone ?? this.isNoFlyWarning,
       currentNfzName: currentNfzName ?? this.currentNfzName,
+      cameraMode: cameraMode ?? this.cameraMode,
     );
   }
 }
