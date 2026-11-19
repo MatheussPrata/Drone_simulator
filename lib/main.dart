@@ -90,37 +90,40 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                   ),
           ),
 
-          // ── Camada 2: Janela PiP (Picture-in-Picture) alternável entre Mapa e Câmera FPV ──
+          // ── Camada 2: Card PiP Arredondado no Canto Inferior Esquerdo (Alternável entre Mini-Mapa e FPV) ──
           Positioned(
-            left: 24,
+            left: 20,
             bottom: 155, // Posicionada de forma limpa acima do joystick esquerdo
             child: GestureDetector(
+              key: const Key('pip_card_gesture'),
               onTap: () {
                 setState(() {
                   _isFpvMain = !_isFpvMain;
                 });
               },
               child: Container(
-                width: 150,
-                height: 100,
+                width: 156,
+                height: 104,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Colors.cyanAccent.withOpacity(0.8),
+                    color: Colors.cyanAccent.withOpacity(0.85),
                     width: 1.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.6),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
+                      color: Colors.black.withOpacity(0.65),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8.5),
+                  borderRadius: BorderRadius.circular(10.5),
                   child: Stack(
                     children: [
+                      // Conteúdo interno do PiP (Mini-Mapa quando FPV é principal, ou FPV quando Mapa é principal)
                       Positioned.fill(
                         child: _isFpvMain
                             ? MiniMapWidget(
@@ -132,35 +135,54 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                                 showOsd: false,
                               ),
                       ),
-                      // Badge indicativo de toque para alternar visão
+
+                      // Botão de expandir / trocar (swap)
                       Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.8),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.4), width: 0.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.swap_horiz,
-                                size: 12,
-                                color: Colors.cyanAccent,
+                        top: 5,
+                        right: 5,
+                        child: GestureDetector(
+                          key: const Key('pip_swap_button'),
+                          onTap: () {
+                            setState(() {
+                              _isFpvMain = !_isFpvMain;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.85),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: Colors.cyanAccent.withOpacity(0.7),
+                                width: 1.0,
                               ),
-                              const SizedBox(width: 3),
-                              Text(
-                                _isFpvMain ? 'MAPA' : 'FPV',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.bold,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.5),
+                                  blurRadius: 4,
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _isFpvMain ? Icons.fullscreen : Icons.swap_horiz,
+                                  size: 13,
+                                  color: Colors.cyanAccent,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  _isFpvMain ? 'MAPA' : 'FPV',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -191,7 +213,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
             ),
           ),
 
-          // ── Camada 3: Joystick Esquerdo Modo 2 (Throttle / Yaw) ──
+          // ── Camada 5: Joystick Esquerdo Modo 2 (Throttle / Yaw) - Translúcido ──
           Positioned(
             left: 28,
             bottom: 24,
@@ -202,6 +224,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                 label: 'THROTTLE / YAW',
                 radius: 56,
                 stickRadius: 20,
+                opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
                 onPositionChanged: (offset) {
                   // Modo 2: para cima (-dy) = subir / aumentar altitude
                   _controller.setManualInput(
@@ -213,7 +236,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
             ),
           ),
 
-          // ── Camada 4: Joystick Direito Modo 2 (Pitch / Roll) ──
+          // ── Camada 6: Joystick Direito Modo 2 (Pitch / Roll) - Translúcido ──
           Positioned(
             right: 28,
             bottom: 24,
@@ -224,6 +247,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
                 label: 'PITCH / ROLL',
                 radius: 56,
                 stickRadius: 20,
+                opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
                 onPositionChanged: (offset) {
                   // Modo 2: para frente (-dy) = avançar; para direita (+dx) = rolar direita
                   _controller.setManualInput(

@@ -38,6 +38,9 @@ class VirtualJoystick extends StatefulWidget {
   /// Rótulo opcional exibido no topo do joystick (ex.: "Altitude / Yaw")
   final String? label;
 
+  /// Opacidade do widget do joystick (0.0 a 1.0) para sobreposição translúcida
+  final double opacity;
+
   const VirtualJoystick({
     super.key,
     this.radius = 60.0,
@@ -49,6 +52,7 @@ class VirtualJoystick extends StatefulWidget {
     this.borderColor = const Color(0x6600E5FF),
     this.innerColor = const Color(0xFF00E5FF),
     this.label,
+    this.opacity = 1.0,
   });
 
   @override
@@ -101,7 +105,7 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
   Widget build(BuildContext context) {
     final diameter = widget.radius * 2;
 
-    return Column(
+    final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (widget.label != null) ...[
@@ -144,6 +148,15 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
         ),
       ],
     );
+
+    if (widget.opacity < 1.0) {
+      return Opacity(
+        opacity: widget.opacity.clamp(0.0, 1.0),
+        child: content,
+      );
+    }
+
+    return content;
   }
 }
 
