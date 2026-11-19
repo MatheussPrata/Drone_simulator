@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:drone_simulator/core/utils/geo_math.dart';
 import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/models/world_obstacle.dart';
+import 'package:drone_simulator/simulation/world_generator.dart';
 
 /// Widget de exibição tática do mapa em 2D/top-down usando apenas recursos nativos do Flutter.
 ///
@@ -93,6 +95,7 @@ class _MapCanvasState extends State<MapCanvas> {
             geofenceRadius: widget.geofenceRadius,
             flightMap: activeMap,
             noFlyZones: nfzList,
+            obstacles: WorldGenerator.generateFor(activeMap),
             panOffset: _panOffset,
           ),
         ),
@@ -125,6 +128,7 @@ class MapCanvasPainter extends CustomPainter {
   final double geofenceRadius;
   final FlightMap flightMap;
   final List<NoFlyZone> noFlyZones;
+  final List<WorldObstacle> obstacles;
   final Offset panOffset;
 
   MapCanvasPainter({
@@ -137,6 +141,7 @@ class MapCanvasPainter extends CustomPainter {
     required this.geofenceRadius,
     required this.flightMap,
     required this.noFlyZones,
+    this.obstacles = const [],
     required this.panOffset,
   });
 
@@ -166,6 +171,9 @@ class MapCanvasPainter extends CustomPainter {
     // 1. Grade de referência no chão
     _drawGroundGrid(canvas);
 
+    // 1.1 Planta de obstáculos (idêntica à cena 3D e à colisão)
+    _drawObstacles(canvas);
+
     // 2. Geofence circular tracejado de 500m
     _drawGeofence(canvas);
 
@@ -187,9 +195,70 @@ class MapCanvasPainter extends CustomPainter {
     _drawScaleIndicator(canvas, size);
   }
 
+  /// Planta de obstáculos do mapa, exatamente a mesma usada na colisão e no 3D.
+  void _drawObstacles(Canvas canvas) {
+    if (obstacles.isEmpty) return;
+
+    final buildingPaint = Paint()..color = const Color(0xFF475569).withOpacity(0.85);
+    final treePaint = Paint()..color = const Color(0xFF2F6B3A).withOpacity(0.85);
+    final rockPaint = Paint()..color = const Color(0xFF6B7280).withOpacity(0.9);
+    final towerPaint = Paint()..color = const Color(0xFFDC2626).withOpacity(0.9);
+    final concretePaint = Paint()..color = const Color(0xFF94A3B8).withOpacity(0.9);
+
+    for (final obstacle in obstacles) {
+      final center =
+          Offset(obstacle.x * pixelsPerMeter, -obstacle.y * pixelsPerMeter);
+
+      switch (obstacle.type) {
+        case ObstacleType.tree:
+          canvas.drawCircle(
+            center,
+            max(obstacle.radius, 1.0) * pixelsPerMeter,
+            treePaint,
+          );
+          break;
+        case ObstacleType.tower:
+          canvas.drawCircle(
+            center,
+            max(obstacle.radius, 1.5) * pixelsPerMeter,
+            towerPaint,
+          );
+          break;
+        case ObstacleType.rock:
+          canvas.drawCircle(
+            center,
+            max(obstacle.radius, 1.0) * pixelsPerMeter,
+            rockPaint,
+          );
+          break;
+        case ObstacleType.building:
+          canvas.drawRect(
+            Rect.fromCenter(
+              center: center,
+              width: obstacle.width * pixelsPerMeter,
+              height: obstacle.depth * pixelsPerMeter,
+            ),
+            buildingPaint,
+          );
+          break;
+        case ObstacleType.dam:
+        case ObstacleType.pillar:
+        case ObstacleType.hangar:
+          canvas.drawRect(
+            Rect.fromCenter(
+              center: center,
+              width: obstacle.width * pixelsPerMeter,
+              height: obstacle.depth * pixelsPerMeter,
+            ),
+            concretePaint,
+          );
+          break;
+      }
+    }
+  }
+
   /// 1. Desenha a grade de referência a cada 50m e eixos cartesianos
-  void _drawGroundGrid(Canvas canvas) {
-    const double stepMeters = 50.0;
+  void _drawGroundGrid(Canvas canvas) {    const double stepMeters = 50.0;
     const double maxExtent = 700.0; // além do geofence
     final double stepPx = stepMeters * pixelsPerMeter;
     final int lineCount = (maxExtent / stepMeters).ceil();

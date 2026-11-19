@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/simulation/world_generator.dart';
 
 /// Widget de renderização do cenário 3D em Three.js local via WebView.
 ///
@@ -26,6 +27,7 @@ class _World3dViewState extends State<World3dView> {
   WebViewController? _webViewController;
   bool _isPageLoaded = false;
   bool _isSending = false;
+  String? _loadedScenarioId;
 
   @override
   void initState() {
@@ -38,6 +40,7 @@ class _World3dViewState extends State<World3dView> {
     if (widget.customWebViewController != null) {
       _webViewController = widget.customWebViewController;
       _isPageLoaded = true;
+      _loadedScenarioId = widget.controller.activeMap.id;
       return;
     }
 
@@ -57,6 +60,7 @@ class _World3dViewState extends State<World3dView> {
               setState(() {
                 _isPageLoaded = true;
               });
+              _pushObstacleLayout();
               _syncStateTo3d();
             }
           },
@@ -83,6 +87,22 @@ class _World3dViewState extends State<World3dView> {
     _syncStateTo3d();
   }
 
+  /// Envia a planta de obstáculos do mapa ativo (fonte única gerada em Dart)
+  /// sempre que o cenário muda, mantendo 3D e colisão perfeitamente alinhados.
+  void _pushObstacleLayout() {
+    if (_webViewController == null) return;
+    final map = widget.controller.activeMap;
+    if (_loadedScenarioId == map.id) return;
+    _loadedScenarioId = map.id;
+
+    final json = WorldGenerator.obstaclesJson(map).replaceAll("'", "\\'");
+    _webViewController!
+        .runJavaScript("window.loadWorldObstacles('$json');")
+        .catchError((Object error) {
+      debugPrint('Erro ao enviar obstáculos ao WebView: $error');
+    });
+  }
+
   String _buildStatePayload() {
     final s = widget.controller;
     final cameraModeStr = s.cameraMode == CameraViewMode.thirdPerson ? 'thirdPerson' : 'fpv';
@@ -96,11 +116,14 @@ class _World3dViewState extends State<World3dView> {
         '"visualPitch":${s.visualPitch.toStringAsFixed(2)},"visualRoll":${s.visualRoll.toStringAsFixed(2)},'
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
         '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":${s.isArmed},'
+        '"impactShake":${s.impactShake.toStringAsFixed(3)},'
         '"status":"${s.status.name}"}';
   }
 
   void _syncStateTo3d() {
     if (!_isPageLoaded || _isSending || _webViewController == null) return;
+
+    _pushObstacleLayout();
 
     _isSending = true;
     final payload = _buildStatePayload();

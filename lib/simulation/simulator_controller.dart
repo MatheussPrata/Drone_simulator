@@ -59,6 +59,9 @@ class SimulatorController extends ChangeNotifier {
   double get gimbalPitch => physics.gimbalPitch;
   double get visualPitch => physics.visualPitch;
   double get visualRoll => physics.visualRoll;
+
+  /// Vibração de câmera por impacto (0..1).
+  double get impactShake => physics.state.impactShake;
   CameraViewMode get cameraMode => _cameraMode;
   bool get isMapPrimaryView => _isMapPrimaryView;
   bool get isSatellite => _isSatellite;

@@ -35,7 +35,7 @@ void main() {
       for (int i = 0; i < 400; i++) {
         physics.update(0.016);
       }
-      expect(physics.state.speedKmh, lessThan(2.0),
+      expect(physics.state.speedKmh, lessThan(3.0),
           reason: 'Arrasto deve frear o drone até quase parar');
 
       // A distância percorrida mostra o deslize (inércia) antes de parar

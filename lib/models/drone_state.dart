@@ -18,6 +18,12 @@ class DroneState {
 
   /// Componente norte da velocidade horizontal (m/s).
   final double velocityNorthMs;
+
+  /// Indica que o drone colidiu em alta velocidade e está caindo.
+  final bool isCrashed;
+
+  /// Intensidade (0..1) da vibração de câmera após um impacto.
+  final double impactShake;
   final double heading;
   final double pitch;
   final double roll;
@@ -48,6 +54,8 @@ class DroneState {
     this.verticalSpeedMs = 0.0,
     this.velocityEastMs = 0.0,
     this.velocityNorthMs = 0.0,
+    this.isCrashed = false,
+    this.impactShake = 0.0,
     this.heading = 0.0,
     this.pitch = 0.0,
     this.roll = 0.0,
@@ -79,6 +87,8 @@ class DroneState {
     double? verticalSpeedMs,
     double? velocityEastMs,
     double? velocityNorthMs,
+    bool? isCrashed,
+    double? impactShake,
     double? heading,
     double? pitch,
     double? roll,
@@ -109,6 +119,8 @@ class DroneState {
       verticalSpeedMs: verticalSpeedMs ?? this.verticalSpeedMs,
       velocityEastMs: velocityEastMs ?? this.velocityEastMs,
       velocityNorthMs: velocityNorthMs ?? this.velocityNorthMs,
+      isCrashed: isCrashed ?? this.isCrashed,
+      impactShake: impactShake ?? this.impactShake,
       heading: heading ?? this.heading,
       pitch: pitch ?? this.pitch,
       roll: roll ?? this.roll,

@@ -6,7 +6,9 @@ import 'package:drone_simulator/models/drone_state.dart';
 import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/models/waypoint.dart';
+import 'package:drone_simulator/models/world_obstacle.dart';
 import 'package:drone_simulator/simulation/geofence_validator.dart';
+import 'package:drone_simulator/simulation/world_generator.dart';
 
 class FlightPhysicsEngine {
   Timer? _timer;
@@ -40,6 +42,15 @@ class FlightPhysicsEngine {
   /// Velocidade informada por modos automáticos (RTH/pouso). -1 = calcular.
   double _externalSpeedKmh = -1.0;
 
+  /// Planta de obstáculos sólidos do mapa (fonte única Dart ↔ Three.js).
+  List<WorldObstacle> _obstacles = const [];
+
+  /// Raio de colisão do corpo do drone.
+  static const double droneRadiusMeters = 0.6;
+
+  /// Vibração de câmera por impacto (0..1), decai ao longo do tempo.
+  double _impactShake = 0.0;
+
   final Random _random = Random();
 
   Function(DroneState)? onStateChanged;
@@ -51,10 +62,12 @@ class FlightPhysicsEngine {
   double get gimbalPitch => _gimbalPitch;
 
   /// Deslocamento em metros a leste do ponto Home.
-  double get eastMeters => GeoMath.offsetToMeters(_state.position, _state.homePosition).$1;
+  double get eastMeters =>
+      GeoMath.offsetToMeters(_state.homePosition, _state.position).$1;
 
   /// Deslocamento em metros ao norte do ponto Home.
-  double get northMeters => GeoMath.offsetToMeters(_state.position, _state.homePosition).$2;
+  double get northMeters =>
+      GeoMath.offsetToMeters(_state.homePosition, _state.position).$2;
 
   /// Sincroniza a cinemática da engine com um modo automático controlado
   /// externamente (decolagem, RTH, pouso), mantendo HUD, minimapa e cena 3D
@@ -90,7 +103,15 @@ class FlightPhysicsEngine {
           homePosition: (initialMap ?? FlightMap.dronePark).homePosition,
           activeProfile: DroneProfile.mini249g,
           activeMap: initialMap ?? FlightMap.dronePark,
-        );
+        ) {
+    _obstacles = WorldGenerator.generateFor(_activeMap);
+  }
+
+  /// Planta de obstáculos ativa (somente leitura).
+  List<WorldObstacle> get obstacles => List.unmodifiable(_obstacles);
+
+  /// Intensidade atual da vibração de câmera (0..1).
+  double get impactShake => _impactShake;
 
   void start() {
     _timer?.cancel();
@@ -147,6 +168,16 @@ class FlightPhysicsEngine {
       return;
     }
 
+    // ── Queda livre após colisão em alta velocidade ──
+    if (_state.isCrashed) {
+      _processCrash(dt);
+      onStateChanged?.call(_state);
+      return;
+    }
+
+    // Decaimento da vibração de câmera.
+    _impactShake = max(0.0, _impactShake - dt * 1.5);
+
     // ── Wind simulation ──
     final windRadians = _state.windDirectionDeg * pi / 180.0;
     final windSpeedMs = _state.windSpeedKmh / 3.6;
@@ -184,12 +215,10 @@ class FlightPhysicsEngine {
       baseDrain += baseDrain * (windSpeedMs / 10.0).clamp(0.0, 1.5);
     }
 
-    // ── Position update ──
-    final candidatePosition = GeoMath.offsetByMeters(
-      _state.position,
-      _velocityX * dt,
-      _velocityY * dt,
-    );
+    // ── Position update (integração em metros a partir do Home) ──
+    final offsets = GeoMath.offsetToMeters(_state.homePosition, _state.position);
+    double nextEast = offsets.$1 + _velocityX * dt;
+    double nextNorth = offsets.$2 + _velocityY * dt;
 
     // ── Altitude update (com teto máximo do mapa modelado) ──
     double newAltitude = (_state.altitude + _verticalVelocity * dt).clamp(0.0, _activeMap.maxAltitudeMeters);
@@ -198,6 +227,16 @@ class FlightPhysicsEngine {
       _verticalVelocity = min(0.0, _verticalVelocity);
       altitudeBreach = true;
     }
+
+    // ── Colisão sólida com prédios, árvores, torres e demais obstáculos ──
+    final collision = _resolveCollisions(nextEast, nextNorth, newAltitude);
+    nextEast = collision.east;
+    nextNorth = collision.north;
+    newAltitude = collision.altitude;
+    final bool crashedThisTick = collision.crashed;
+
+    final candidatePosition =
+        GeoMath.offsetByMeters(_state.homePosition, nextEast, nextNorth);
 
     // ── Geofence & No-Fly Zone validation via GeofenceValidator ──
     final validation = GeofenceValidator.validate(
@@ -307,9 +346,112 @@ class FlightPhysicsEngine {
       inNoFlyZone: inNfz,
       isNoFlyWarning: isNfWarning,
       currentNfzName: nfzName,
+      isCrashed: crashedThisTick || _state.isCrashed,
+      impactShake: _impactShake,
     );
 
     onStateChanged?.call(_state);
+  }
+
+  /// Verifica e resolve colisões sólidas com a planta de obstáculos.
+  ///
+  /// Empurra o drone para fora das paredes (deslizamento suave), permite pouso
+  /// sobre telhados planos e marca [crashed] quando o impacto é violento.
+  ({double east, double north, double altitude, bool crashed})
+      _resolveCollisions(double east, double north, double altitude) {
+    if (_state.flightMode == FlightMode.disarmed || _obstacles.isEmpty) {
+      return (east: east, north: north, altitude: altitude, crashed: false);
+    }
+
+    bool crashed = false;
+
+    for (final obstacle in _obstacles) {
+      // Pouso suave sobre telhado plano de prédio/barragem.
+      if (obstacle.isWalkableRoof &&
+          _verticalVelocity <= 0.0 &&
+          altitude >= obstacle.height - 0.2 &&
+          altitude <= obstacle.height + 1.5 &&
+          obstacle.coversPoint(east, north)) {
+        altitude = obstacle.height;
+        _verticalVelocity = 0.0;
+        _hoverAnchorAltitude = altitude;
+        _velocityX *= 0.55;
+        _velocityY *= 0.55;
+        continue;
+      }
+
+      // Voa acima do obstáculo: sem colisão.
+      if (altitude >= obstacle.height) continue;
+
+      if (!obstacle.collidesAt(east, north, droneRadiusMeters)) continue;
+
+      final double impactSpeed =
+          sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
+
+      final resolved = obstacle.resolve(east, north, droneRadiusMeters);
+      east = resolved.x;
+      north = resolved.y;
+
+      // Zera a componente normal da velocidade (desliza pela parede).
+      final double normalVelocity =
+          _velocityX * resolved.normalX + _velocityY * resolved.normalY;
+      if (normalVelocity < 0) {
+        _velocityX -= normalVelocity * resolved.normalX;
+        _velocityY -= normalVelocity * resolved.normalY;
+      }
+
+      // Recuo leve para não ficar colado na parede.
+      _velocityX += resolved.normalX * 0.4;
+      _velocityY += resolved.normalY * 0.4;
+
+      _impactShake = max(_impactShake, (impactSpeed / 12.0).clamp(0.15, 1.0));
+
+      if (impactSpeed * 3.6 > 35.0) {
+        crashed = true;
+      }
+    }
+
+    return (east: east, north: north, altitude: altitude, crashed: crashed);
+  }
+
+  /// Queda livre após colisão violenta, até tocar o solo.
+  void _processCrash(double dt) {
+    final offsets = GeoMath.offsetToMeters(_state.homePosition, _state.position);
+    double east = offsets.$1 + _velocityX * dt;
+    double north = offsets.$2 + _velocityY * dt;
+    double altitude = _state.altitude + _verticalVelocity * dt;
+
+    _verticalVelocity = max(_verticalVelocity - gravity * dt, -9.0);
+    _velocityX *= 0.995;
+    _velocityY *= 0.995;
+    _impactShake = max(0.0, _impactShake - dt * 1.5);
+
+    bool disarmed = false;
+    if (altitude <= 0.0) {
+      altitude = 0.0;
+      _velocityX = 0.0;
+      _velocityY = 0.0;
+      _verticalVelocity = 0.0;
+      _impactShake = 0.0;
+      disarmed = true;
+    }
+
+    final position = GeoMath.offsetByMeters(_state.homePosition, east, north);
+    final double speedMs = sqrt(_velocityX * _velocityX +
+        _velocityY * _velocityY +
+        _verticalVelocity * _verticalVelocity);
+
+    _state = _state.copyWith(
+      position: position,
+      altitude: altitude,
+      speedKmh: speedMs * 3.6,
+      verticalSpeedMs: _verticalVelocity,
+      velocityEastMs: _velocityX,
+      velocityNorthMs: _velocityY,
+      impactShake: _impactShake,
+      isCrashed: !disarmed,
+      flightMode: disarmed ? FlightMode.disarmed : _state.flightMode,
+    );
   }
 
   void _processManualFlight(
@@ -385,7 +527,7 @@ class FlightPhysicsEngine {
         sqrt(_velocityX * _velocityX + _velocityY * _velocityY);
     if (horizontalSpeed > 0.0001) {
       final double dragAccel =
-          0.55 * horizontalSpeed + 0.012 * horizontalSpeed * horizontalSpeed;
+          0.45 * horizontalSpeed + 0.010 * horizontalSpeed * horizontalSpeed;
       final double scale =
           (1.0 - (dragAccel * dt) / horizontalSpeed).clamp(0.0, 1.0);
       _velocityX *= scale;
@@ -548,10 +690,12 @@ class FlightPhysicsEngine {
 
   void selectMap(FlightMap newMap) {
     _activeMap = newMap;
+    _obstacles = WorldGenerator.generateFor(newMap);
     if (_state.flightMode == FlightMode.disarmed) {
       _visualPitch = 0.0;
       _visualRoll = 0.0;
       _gimbalPitch = 0.0;
+      _impactShake = 0.0;
       _state = _state.copyWith(
         activeMap: newMap,
         position: newMap.homePosition,
@@ -562,6 +706,8 @@ class FlightPhysicsEngine {
         visualPitch: 0.0,
         visualRoll: 0.0,
         gimbalPitch: 0.0,
+        isCrashed: false,
+        impactShake: 0.0,
       );
     } else {
       _state = _state.copyWith(activeMap: newMap);
@@ -595,6 +741,8 @@ class FlightPhysicsEngine {
         flightMode: FlightMode.hover,
         altitude: 2.0,
         homePosition: _state.position,
+        isCrashed: false,
+        impactShake: 0.0,
       );
       _verticalVelocity = 0.0;
       _velocityX = 0.0;
