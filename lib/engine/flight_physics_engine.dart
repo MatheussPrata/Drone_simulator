@@ -53,6 +53,12 @@ class FlightPhysicsEngine {
   }
 
   /// Avança a simulação física por um intervalo de tempo [dt] segundos.
+  /// Padrão 60 FPS: 0.016s.
+  void update([double dt = 0.016]) {
+    _step(dt);
+  }
+
+  /// Avança a simulação física por um intervalo de tempo [dt] segundos.
   /// Pode ser chamado manualmente em testes unitários determinísticos.
   void tick([double dt = 0.05]) {
     _step(dt);
