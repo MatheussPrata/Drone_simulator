@@ -58,6 +58,8 @@
         pitchRad: 0.0,
         rollRad: 0.0,
         yawRad: 0.0,
+        isCrashed: false,
+        crashImpactSpeedKmh: 0.0,
         isArmed: false,
         status: 'landed'
       };
@@ -731,6 +733,101 @@
       }
       buildDroneModel();
 
+      // LED traseiro que pisca em vermelho durante o crash.
+      var crashLedMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+      var crashLed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), crashLedMat);
+      crashLed.position.set(0, 0.10, 0.18);
+      droneGroup.add(crashLed);
+
+      // ── Sistema de partículas de impacto (faíscas + fumaça) ──
+      var crashParticles = [];
+      var crashShakeTime = 0.0;
+      var crashShakeMagnitude = 0.0;
+
+      function spawnCrashEffect(position, impactKmh) {
+        var sparkCount = 42;
+        var smokeCount = 18;
+
+        for (var i = 0; i < sparkCount; i++) {
+          var sparkMat = new THREE.MeshBasicMaterial({
+            color: (i % 2 === 0) ? 0xffbb33 : 0xff6622,
+            transparent: true,
+            opacity: 1.0
+          });
+          var spark = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.07), sparkMat);
+          spark.position.copy(position);
+          scene.add(spark);
+          var speed = 2.5 + Math.random() * 4.0;
+          var theta = Math.random() * Math.PI * 2;
+          var phi = Math.random() * Math.PI * 0.5;
+          crashParticles.push({
+            mesh: spark,
+            life: 1.1 + Math.random() * 0.5,
+            maxLife: 1.6,
+            kind: 'spark',
+            vx: Math.cos(theta) * Math.cos(phi) * speed,
+            vy: Math.sin(phi) * speed + 1.5,
+            vz: Math.sin(theta) * Math.cos(phi) * speed
+          });
+        }
+
+        for (var j = 0; j < smokeCount; j++) {
+          var smokeMat = new THREE.MeshBasicMaterial({
+            color: 0x8a8a8a,
+            transparent: true,
+            opacity: 0.45
+          });
+          var puff = new THREE.Mesh(new THREE.SphereGeometry(0.16 + Math.random() * 0.12, 6, 6), smokeMat);
+          puff.position.copy(position);
+          scene.add(puff);
+          crashParticles.push({
+            mesh: puff,
+            life: 1.6 + Math.random(),
+            maxLife: 2.6,
+            kind: 'smoke',
+            vx: (Math.random() * 2 - 1) * 0.8,
+            vy: 0.8 + Math.random() * 1.2,
+            vz: (Math.random() * 2 - 1) * 0.8
+          });
+        }
+
+        crashShakeTime = 0.5;
+        crashShakeMagnitude = Math.min(0.7, 0.2 + (impactKmh || 0) / 90.0);
+      }
+
+      function updateCrashParticles(dt) {
+        for (var i = crashParticles.length - 1; i >= 0; i--) {
+          var p = crashParticles[i];
+          p.life -= dt;
+          if (p.life <= 0) {
+            scene.remove(p.mesh);
+            if (p.mesh.geometry) p.mesh.geometry.dispose();
+            p.mesh.material.dispose();
+            crashParticles.splice(i, 1);
+            continue;
+          }
+          if (p.kind === 'spark') {
+            p.vy -= 9.8 * dt;
+          } else {
+            p.mesh.scale.multiplyScalar(1.0 + 1.4 * dt);
+            p.vy *= 0.99;
+          }
+          p.mesh.position.x += p.vx * dt;
+          p.mesh.position.y += p.vy * dt;
+          p.mesh.position.z += p.vz * dt;
+          if (p.mesh.position.y < 0.05) {
+            p.mesh.position.y = 0.05;
+            p.vy = Math.abs(p.vy) * 0.25;
+          }
+          p.mesh.material.opacity =
+            Math.max(0.0, Math.min(1.0, 1.1 * (p.life / p.maxLife)));
+        }
+
+        if (crashShakeTime > 0.0) {
+          crashShakeTime = Math.max(0.0, crashShakeTime - dt);
+        }
+      }
+
       // ── Câmera Dinâmica (FPV vs 3ª Pessoa / Chase Cam) ──
       // ── Estado da câmera: transição FPV ↔ 3ª pessoa ──
       var cameraTransition = 0.0;          // 0 = FPV, 1 = 3ª pessoa
@@ -770,6 +867,11 @@
         if (typeof data.pitchRad === 'number') droneState.pitchRad = data.pitchRad;
         if (typeof data.rollRad === 'number') droneState.rollRad = data.rollRad;
         if (typeof data.yawRad === 'number') droneState.yawRad = data.yawRad;
+        if (typeof data.crashImpactSpeedKmh === 'number') {
+          droneState.crashImpactSpeedKmh = data.crashImpactSpeedKmh;
+        }
+        var wasCrashed = droneState.isCrashed;
+        if (typeof data.isCrashed === 'boolean') droneState.isCrashed = data.isCrashed;
         if (Array.isArray(data.motors) && data.motors.length >= 4) {
           droneState.motors = data.motors.map(function (m) {
             return Math.min(1.0, Math.max(0.0, Number(m) || 0.0));
@@ -777,6 +879,10 @@
         }
 
         updateDroneTransform();
+
+        if (!wasCrashed && droneState.isCrashed) {
+          spawnCrashEffect(droneGroup.position, droneState.crashImpactSpeedKmh);
+        }
       };
 
       function updateDroneTransform() {
@@ -879,6 +985,14 @@
         droneGroup.visible = cameraTransition > 0.02;
 
         // Vibração de câmera em impactos (decaimento vem da física em Dart)
+        if (crashShakeTime > 0.0) {
+          var shakeFactor = (crashShakeTime / 0.5) * crashShakeMagnitude;
+          camera.position.x += (Math.random() * 2 - 1) * shakeFactor;
+          camera.position.y += (Math.random() * 2 - 1) * shakeFactor;
+          camera.position.z += (Math.random() * 2 - 1) * shakeFactor;
+          camera.rotateZ((Math.random() * 2 - 1) * 0.06 * shakeFactor);
+        }
+
         if (droneState.impactShake > 0.001) {
           var shake = droneState.impactShake;
           camera.position.x += (Math.random() * 2 - 1) * 0.18 * shake;
@@ -907,6 +1021,9 @@
           droneState.status === 'landing' ||
           droneState.z > 0.05;
 
+        if (droneState.isCrashed) {
+          isSpinning = false;
+        }
         var motors = droneState.motors || [0.0, 0.0, 0.0, 0.0];
         for (var i = 0; i < dronePropellers.length; i++) {
           var motorNorm = isSpinning
@@ -919,6 +1036,12 @@
           dronePropellers[i].hub.rotation.y +=
             propSpeed * dronePropellers[i].dir * frameDt;
         }
+
+        updateCrashParticles(frameDt);
+
+        // LED de crash pisca rápido em vermelho
+        crashLed.visible = !droneState.isCrashed ||
+          (Math.floor(performance.now() / 90) % 2 === 0);
 
         updateCameraFrame(frameDt);
         renderer.render(scene, camera);

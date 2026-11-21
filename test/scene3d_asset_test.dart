@@ -40,6 +40,14 @@ void main() {
       expect(html.contains('window.updateDroneState'), true);
     });
 
+    test('Cena tem efeitos de crash (faíscas, fumaça, shake e LED)', () {
+      expect(html.contains('spawnCrashEffect'), true);
+      expect(html.contains('crashParticles'), true);
+      expect(html.contains('crashShakeTime'), true);
+      expect(html.contains('crashLed'), true);
+      expect(html.contains('droneState.isCrashed'), true);
+    });
+
     test('Cena usa atitude em radianos e RPM individual das 4 hélices', () {
       expect(html.contains('pitchRad'), true);
       expect(html.contains('rollRad'), true);

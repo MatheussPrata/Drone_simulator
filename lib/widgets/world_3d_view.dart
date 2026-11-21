@@ -123,6 +123,8 @@ class _World3dViewState extends State<World3dView> {
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
         '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":${s.isArmed},'
         '"impactShake":${s.impactShake.toStringAsFixed(3)},'
+        '"isCrashed":${s.isCrashed},'
+        '"crashImpactSpeedKmh":${s.crashImpactSpeedKmh.toStringAsFixed(1)},'
         '"status":"${s.status.name}"}';
   }
 
