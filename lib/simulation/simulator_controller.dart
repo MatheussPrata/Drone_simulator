@@ -38,8 +38,14 @@ class SimulatorController extends ChangeNotifier {
   /// Raio de colisão do corpo do drone (m).
   static const double droneRadiusMeters = 0.6;
 
-  /// Impacto acima disso (m/s ≈ 40 km/h) derruba o drone.
-  static const double crashImpactSpeedMs = 11.0;
+  /// Impacto a partir daqui (m/s ≈ 12,6 km/h) derruba o drone.
+  static const double crashImpactSpeedMs = 3.5;
+
+  /// Impacto vertical no solo que caracteriza queda violenta (m/s).
+  static const double hardGroundImpactMs = 5.5;
+
+  /// Coeficiente de restituição do ricochete em obstáculos.
+  static const double collisionRestitution = 0.35;
 
   final FlightPhysics physics;
   final QuadrotorPhysicsEngine sixDof;
@@ -66,6 +72,9 @@ class SimulatorController extends ChangeNotifier {
 
   double _impactShake = 0.0;
   double _windSpeedMps = 0.0;
+  double _crashImpactSpeedKmh = 0.0;
+  double _crashTimer = 0.0;
+  DateTime? _lastCrashTimestamp;
   double _benchPitchDeg = 0.0;
   double _benchRollDeg = 0.0;
   PhysicsSnapshot? _lastSnapshot;
@@ -110,6 +119,12 @@ class SimulatorController extends ChangeNotifier {
   bool get isCrashed => _status == SimulatorStatus.crashed;
   bool get isRunning => _timer != null;
   double get impactShake => _impactShake;
+
+  /// Velocidade do último impacto que causou crash (km/h).
+  double get crashImpactSpeedKmh => _crashImpactSpeedKmh;
+
+  /// Instante do último crash.
+  DateTime? get lastCrashTimestamp => _lastCrashTimestamp;
 
   FlightControlMode get flightMode => _flightMode;
   String get flightModeLabel {
@@ -156,6 +171,8 @@ class SimulatorController extends ChangeNotifier {
       yawRad: yawRad,
       windSpeedMps: _windSpeedMps,
       inVortexRingState: inVortexRingState,
+      crashImpactSpeedKmh: _crashImpactSpeedKmh,
+      lastCrashTimestamp: _lastCrashTimestamp,
     );
   }
 
@@ -436,6 +453,7 @@ class SimulatorController extends ChangeNotifier {
     }
 
     final input = _buildStickInput();
+    final previousVz = _lastSnapshot?.velocity.z ?? 0.0;
     final snapshot = sixDof.step(
       input: input,
       dt: dt,
@@ -445,8 +463,18 @@ class SimulatorController extends ChangeNotifier {
 
     _applySnapshot(snapshot);
     _resolveWorldCollisions(snapshot);
+
+    // Impacto violento no solo durante voo armado.
+    if (_status != SimulatorStatus.crashed &&
+        snapshot.isGrounded &&
+        previousVz < -hardGroundImpactMs) {
+      _triggerCrash(previousVz.abs(), const Vec3(0, 0, 1), snapshot);
+    }
     _advanceStatusMachine();
 
+    if (_status == SimulatorStatus.crashed) {
+      _crashTimer += dt;
+    }
     _impactShake = max(0.0, _impactShake - dt * 1.5);
     notifyListeners();
   }
@@ -566,7 +594,8 @@ class SimulatorController extends ChangeNotifier {
         break;
 
       case SimulatorStatus.crashed:
-        if (_z <= 0.02) {
+        // Mantém o card de queda visível por um instante antes de encerrar.
+        if (_z <= 0.02 && _crashTimer >= 0.5) {
           _z = 0.0;
           _status = SimulatorStatus.landed;
           _isArmed = false;
@@ -586,7 +615,11 @@ class SimulatorController extends ChangeNotifier {
   // ────────────────────────────────────────────────────────────
 
   void _resolveWorldCollisions(PhysicsSnapshot snapshot) {
-    if (!_isArmed || _status == SimulatorStatus.crashed) return;
+    if (_status == SimulatorStatus.crashed) return;
+    if (_status == SimulatorStatus.landed ||
+        _status == SimulatorStatus.disarmed) {
+      return;
+    }
 
     final obstacles = WorldGenerator.generateFor(activeMap);
     if (obstacles.isEmpty) return;
@@ -594,7 +627,7 @@ class SimulatorController extends ChangeNotifier {
     var east = snapshot.position.x;
     var north = snapshot.position.y;
     var altitude = snapshot.position.z;
-    var velocity = snapshot.velocity;
+    final velocity = snapshot.velocity;
 
     double velocityEast = velocity.x;
     double velocityNorth = velocity.y;
@@ -612,43 +645,80 @@ class SimulatorController extends ChangeNotifier {
       east = resolved.x;
       north = resolved.y;
 
-      final incoming =
-          sqrt(velocityEast * velocityEast + velocityNorth * velocityNorth);
-      impactSpeed = max(impactSpeed, incoming);
-
-      normalX = resolved.normalX;
-      normalY = resolved.normalY;
+      final approaching =
+          -(velocityEast * resolved.normalX + velocityNorth * resolved.normalY);
+      if (approaching > impactSpeed) {
+        impactSpeed = approaching;
+        normalX = resolved.normalX;
+        normalY = resolved.normalY;
+      }
       collided = true;
     }
 
     if (!collided) return;
 
+    // Ricochete afastando da normal (restituição 0.35).
     final correctedVelocity = Vec3(
-      velocityEast * 0.75 + normalX * impactSpeed * 0.25,
-      velocityNorth * 0.75 + normalY * impactSpeed * 0.25,
+      velocityEast - (1.0 + collisionRestitution) * impactSpeed * normalX,
+      velocityNorth - (1.0 + collisionRestitution) * impactSpeed * normalY,
       velocity.z,
+    );
+
+    final angularMagnitude =
+        (4.0 + 6.0 * (impactSpeed / 12.0)).clamp(4.0, 10.0);
+    final angularImpulse = Vec3(
+      (normalY * angularMagnitude).clamp(-10.0, 10.0),
+      (-normalX * angularMagnitude).clamp(-10.0, 10.0),
+      ((normalX - normalY) * angularMagnitude * 0.35).clamp(-10.0, 10.0),
     );
 
     sixDof.applyExternalCollisionCorrection(
       correctedPosition: Vec3(east, north, altitude),
       correctedVelocity: correctedVelocity,
+      angularImpulseBody: angularImpulse,
+    );
+
+    _impactShake = max(_impactShake, (impactSpeed / 10.0).clamp(0.2, 1.0));
+    _x = east;
+    _y = north;
+    _lastSnapshot = sixDof.snapshot;
+
+    if (impactSpeed >= crashImpactSpeedMs) {
+      _triggerCrash(impactSpeed, Vec3(normalX, normalY, 0), _lastSnapshot!);
+    }
+  }
+
+  /// Dispara o estado de crash: corta os motores e registra o impacto.
+  void _triggerCrash(
+    double impactSpeedMs,
+    Vec3 normal,
+    PhysicsSnapshot snapshot,
+  ) {
+    _status = SimulatorStatus.crashed;
+    _isArmed = false;
+    sixDof.setArmed(false);
+
+    _crashImpactSpeedKmh = impactSpeedMs * 3.6;
+    _lastCrashTimestamp = DateTime.now();
+    _crashTimer = 0.0;
+    _impactShake = 1.0;
+
+    // Ricochete + giro violento proporcional à batida.
+    final magnitude = (4.0 + 6.0 * (impactSpeedMs / 12.0)).clamp(4.0, 10.0);
+    sixDof.applyExternalCollisionCorrection(
+      correctedPosition: snapshot.position,
+      correctedVelocity: Vec3(
+        snapshot.velocity.x * 0.65 + normal.x * magnitude * 0.4,
+        snapshot.velocity.y * 0.65 + normal.y * magnitude * 0.4,
+        max(0.0, snapshot.velocity.z * 0.3),
+      ),
       angularImpulseBody: Vec3(
-        normalY * impactSpeed * 0.08,
-        -normalX * impactSpeed * 0.08,
-        (impactSpeed * 0.02).clamp(-0.4, 0.4),
+        normal.y * magnitude,
+        -normal.x * magnitude,
+        magnitude * 0.6,
       ),
     );
 
-    _impactShake = max(_impactShake, (impactSpeed / 12.0).clamp(0.15, 1.0));
-
-    if (impactSpeed > crashImpactSpeedMs) {
-      _status = SimulatorStatus.crashed;
-      _isArmed = false;
-      sixDof.setArmed(false);
-    }
-
-    _x = east;
-    _y = north;
     _lastSnapshot = sixDof.snapshot;
   }
 }

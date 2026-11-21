@@ -38,6 +38,12 @@ class DroneState {
 
   /// Verdadeiro quando o drone está em Vortex Ring State.
   final bool inVortexRingState;
+
+  /// Velocidade do último impacto que derrubou o drone (km/h).
+  final double crashImpactSpeedKmh;
+
+  /// Momento do último crash (para efeitos visuais/UI).
+  final DateTime? lastCrashTimestamp;
   final double heading;
   final double pitch;
   final double roll;
@@ -76,6 +82,8 @@ class DroneState {
     this.yawRad = 0.0,
     this.windSpeedMps = 0.0,
     this.inVortexRingState = false,
+    this.crashImpactSpeedKmh = 0.0,
+    this.lastCrashTimestamp,
     this.heading = 0.0,
     this.pitch = 0.0,
     this.roll = 0.0,
@@ -115,6 +123,8 @@ class DroneState {
     double? yawRad,
     double? windSpeedMps,
     bool? inVortexRingState,
+    double? crashImpactSpeedKmh,
+    DateTime? lastCrashTimestamp,
     double? heading,
     double? pitch,
     double? roll,
@@ -153,6 +163,8 @@ class DroneState {
       yawRad: yawRad ?? this.yawRad,
       windSpeedMps: windSpeedMps ?? this.windSpeedMps,
       inVortexRingState: inVortexRingState ?? this.inVortexRingState,
+      crashImpactSpeedKmh: crashImpactSpeedKmh ?? this.crashImpactSpeedKmh,
+      lastCrashTimestamp: lastCrashTimestamp ?? this.lastCrashTimestamp,
       heading: heading ?? this.heading,
       pitch: pitch ?? this.pitch,
       roll: roll ?? this.roll,

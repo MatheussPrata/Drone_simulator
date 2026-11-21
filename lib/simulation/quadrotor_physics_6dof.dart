@@ -574,13 +574,31 @@ class QuadrotorPhysicsEngine {
     // 9. Contato com o solo (atrito, amortecimento e nivelamento dos skids).
     if (_position.z <= groundHeightM) {
       _position = Vec3(_position.x, _position.y, groundHeightM);
-      if (_velocity.z < 0.0) {
-        _velocity = Vec3(_velocity.x * 0.85, _velocity.y * 0.85, 0.0);
+
+      if (!_armed && _velocity.z < -1.5) {
+        // Queda livre desarmada: quica levemente e mantém o tombamento.
+        _velocity = Vec3(
+          _velocity.x * 0.65,
+          _velocity.y * 0.65,
+          -_velocity.z * 0.28,
+        );
+        _omegaBody = _omegaBody * 0.9;
+        // Não nivela: o drone permanece tombado onde caiu.
+      } else if (_armed) {
+        if (_velocity.z < 0.0) {
+          _velocity = Vec3(_velocity.x * 0.85, _velocity.y * 0.85, 0.0);
+        }
+        _omegaBody = _omegaBody * 0.7;
+        // Pouso normal: nivela suavemente sobre o trem de pouso.
+        final euler = _orientation.toEulerRadians();
+        _orientation = Quat.fromYaw(euler.yaw);
+      } else {
+        // Desarmado em contato suave: apenas assenta, sem nivelar.
+        if (_velocity.z < 0.0) {
+          _velocity = Vec3(_velocity.x * 0.8, _velocity.y * 0.8, 0.0);
+        }
+        _omegaBody = _omegaBody * 0.8;
       }
-      _omegaBody = _omegaBody * 0.7;
-      // Nivela suavemente sobre o trem de pouso.
-      final euler = _orientation.toEulerRadians();
-      _orientation = Quat.fromYaw(euler.yaw);
       _isGrounded = true;
     } else {
       _isGrounded = false;
