@@ -40,6 +40,14 @@ void main() {
       expect(html.contains('window.updateDroneState'), true);
     });
 
+    test('Cena desenha portais 3D e seta guia da corrida', () {
+      expect(html.contains('window.updateRaceState'), true);
+      expect(html.contains('TorusGeometry'), true);
+      expect(html.contains('guideArrow'), true);
+      expect(html.contains('raceActiveIndex'), true);
+      expect(html.contains('raceModeOn'), true);
+    });
+
     test('Cena tem efeitos de crash (faíscas, fumaça, shake e LED)', () {
       expect(html.contains('spawnCrashEffect'), true);
       expect(html.contains('crashParticles'), true);

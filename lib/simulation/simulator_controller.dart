@@ -138,6 +138,16 @@ class SimulatorController extends ChangeNotifier {
   RaceManager? get raceManager => _raceManager;
   RaceCourse? get raceCourse => _raceManager?.course;
 
+  RaceStatus? get raceStatus => _raceManager?.status;
+  double get raceElapsedSeconds => _raceManager?.elapsedSeconds ?? 0.0;
+  double get raceScore => _raceManager?.score ?? 0.0;
+  int get raceGateIndex => _raceManager?.currentGateIndex ?? 0;
+  int get raceTotalGates => _raceManager?.totalGates ?? 0;
+  int get raceCombo => _raceManager?.combo ?? 1;
+  double? get raceBestTime => _raceManager?.bestTime;
+  double get raceDistanceToGate =>
+      _raceManager?.distanceToNextGate(_x, _y, _z) ?? 0.0;
+
   FlightControlMode get flightMode => _flightMode;
   String get flightModeLabel {
     switch (_flightMode) {
@@ -198,6 +208,13 @@ class SimulatorController extends ChangeNotifier {
       _simulatorMode = SimulatorMode.freeFlight;
       _raceManager = null;
     }
+    notifyListeners();
+  }
+
+  /// Respawn imediato após queda (voo livre).
+  void respawn() {
+    reset();
+    armAndTakeoff();
     notifyListeners();
   }
 
@@ -433,13 +450,11 @@ class SimulatorController extends ChangeNotifier {
   }
 
   void _syncSixDofPosition() {
-    if (_isArmed) {
-      sixDof.applyExternalCollisionCorrection(
-        correctedPosition: Vec3(_x, _y, _z),
-        correctedVelocity: const Vec3(0, 0, 0),
-      );
-      _lastSnapshot = sixDof.snapshot;
-    }
+    sixDof.applyExternalCollisionCorrection(
+      correctedPosition: Vec3(_x, _y, _z),
+      correctedVelocity: const Vec3(0, 0, 0),
+    );
+    _lastSnapshot = sixDof.snapshot;
   }
 
   void setBattery(double percent) {

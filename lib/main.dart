@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
+import 'package:drone_simulator/widgets/game_hud_overlay.dart';
 import 'package:drone_simulator/widgets/gimbal_slider.dart';
 import 'package:drone_simulator/widgets/mini_map_widget.dart';
 import 'package:drone_simulator/widgets/minimap_pip.dart';
@@ -125,6 +126,11 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
               controller: _controller,
               actionsPlacement: HudActionsPlacement.top,
             ),
+          ),
+
+          // ── Camada 4.5: HUD do Modo Jogo + Cards de Queda/Vitória ──
+          Positioned.fill(
+            child: GameHudOverlay(controller: _controller),
           ),
 
           // ── Camada 5: Joystick Esquerdo Modo 2 (Throttle / Yaw) - Translúcido ──

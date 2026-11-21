@@ -28,6 +28,9 @@ class _World3dViewState extends State<World3dView> {
   bool _isPageLoaded = false;
   bool _isSending = false;
   String? _loadedScenarioId;
+  String? _lastRaceMapId;
+  int _lastRaceGateIndex = -1;
+  bool _racePushed = false;
 
   @override
   void initState() {
@@ -87,6 +90,47 @@ class _World3dViewState extends State<World3dView> {
     _syncStateTo3d();
   }
 
+  /// Envia o circuito de portais e o índice ativo para a cena 3D.
+  void _pushRaceState() {
+    final controller = widget.controller;
+    final course = controller.raceCourse;
+
+    if (!controller.isRaceMode || course == null) {
+      if (_racePushed) {
+        _racePushed = false;
+        _lastRaceMapId = null;
+        _lastRaceGateIndex = -1;
+        _webViewController!
+            .runJavaScript("window.updateRaceState('{\"mode\":\"freeFlight\"}');")
+            .catchError((Object error) {
+          debugPrint('Erro ao limpar circuito no WebView: $error');
+        });
+      }
+      return;
+    }
+
+    final index = controller.raceGateIndex;
+    if (_racePushed &&
+        _lastRaceMapId == course.mapId &&
+        _lastRaceGateIndex == index) {
+      return;
+    }
+
+    _racePushed = true;
+    _lastRaceMapId = course.mapId;
+    _lastRaceGateIndex = index;
+
+    final courseJson = course.toJsonString();
+    final body = '${courseJson.substring(0, courseJson.length - 1)},'
+        '"mode":"gateRace","activeIndex":$index}';
+
+    _webViewController!
+        .runJavaScript("window.updateRaceState('$body');")
+        .catchError((Object error) {
+      debugPrint('Erro ao enviar circuito ao WebView: $error');
+    });
+  }
+
   /// Envia o cenário (tema do terreno + planta de obstáculos) do mapa ativo
   /// sempre que ele muda, mantendo 3D e colisão perfeitamente alinhados.
   void _pushObstacleLayout() {
@@ -132,6 +176,7 @@ class _World3dViewState extends State<World3dView> {
     if (!_isPageLoaded || _isSending || _webViewController == null) return;
 
     _pushObstacleLayout();
+    _pushRaceState();
 
     _isSending = true;
     final payload = _buildStatePayload();

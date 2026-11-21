@@ -198,6 +198,13 @@ class TelemetryHud extends StatelessWidget {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (controller != null) ...[
+                            _buildSimModeButton(
+                              isRaceMode: controller!.isRaceMode,
+                              onTap: controller!.toggleSimulatorMode,
+                            ),
+                            const SizedBox(width: 6),
+                          ],
                           if (flightModeLabel != null) ...[
                             _buildFlightModeButton(
                               label: flightModeLabel,
@@ -245,6 +252,49 @@ class TelemetryHud extends StatelessWidget {
               message: warningMessage ?? 'ALERTA: LIMITE MÁXIMO DE GEOFENCE (500M) PRÓXIMO!',
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSimModeButton({
+    required bool isRaceMode,
+    VoidCallback? onTap,
+  }) {
+    const color = Colors.lightGreenAccent;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('btn_sim_mode'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.16),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withOpacity(0.6), width: 1.0),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isRaceMode ? Icons.flag : Icons.flight,
+                size: 14,
+                color: color,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                isRaceMode ? 'MODO JOGO' : 'VOO LIVRE',
+                style: const TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1002,6 +1002,124 @@
         }
       }
 
+      // ── Portais da corrida (Corrida de Portais) ──
+      var raceGroup = new THREE.Group();
+      scene.add(raceGroup);
+      var raceGates = [];
+      var raceActiveIndex = 0;
+      var raceModeOn = false;
+      var guideArrow = null;
+
+      function clearRaceGates() {
+        while (raceGroup.children.length > 0) {
+          var child = raceGroup.children.pop();
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+        }
+        raceGates = [];
+      }
+
+      function buildRaceGate(gate, isActive, isNext) {
+        var color = isActive ? 0x00e5ff : (isNext ? 0x33dd66 : 0x557788);
+        var mat = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: isActive ? 0.95 : (isNext ? 0.42 : 0.18),
+          side: THREE.DoubleSide
+        });
+        var ring = new THREE.Mesh(
+          new THREE.TorusGeometry(gate.radius, isActive ? 0.32 : 0.18, 8, 40),
+          mat
+        );
+        ring.position.set(gate.x, gate.z, -gate.y);
+        ring.rotation.y = (gate.yaw * Math.PI / 180.0) + Math.PI;
+        ring.visible = isActive || isNext;
+        raceGroup.add(ring);
+
+        if (isActive) {
+          // Setas luminosas ao redor do anel ativo.
+          for (var i = 0; i < 4; i++) {
+            var arrow = new THREE.Mesh(
+              new THREE.ConeGeometry(0.35, 0.9, 6),
+              new THREE.MeshBasicMaterial({ color: 0xffd166 })
+            );
+            var angle = (i / 4) * Math.PI * 2;
+            arrow.position.set(
+              gate.x + Math.cos(angle) * gate.radius,
+              gate.z + Math.sin(angle) * gate.radius,
+              -gate.y
+            );
+            arrow.rotation.z = angle + Math.PI;
+            raceGroup.add(arrow);
+          }
+        }
+        return ring;
+      }
+
+      function updateGuideArrow() {
+        if (!raceModeOn || raceGates.length === 0) {
+          if (guideArrow) guideArrow.visible = false;
+          return;
+        }
+        var gate = raceGates[raceActiveIndex];
+        if (!gate) {
+          if (guideArrow) guideArrow.visible = false;
+          return;
+        }
+
+        if (!guideArrow) {
+          guideArrow = new THREE.Mesh(
+            new THREE.ConeGeometry(0.35, 1.0, 8),
+            new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.85 })
+          );
+          scene.add(guideArrow);
+        }
+        guideArrow.visible = true;
+        guideArrow.position.set(
+          droneGroup.position.x,
+          droneGroup.position.y + 1.6,
+          droneGroup.position.z
+        );
+        var target = new THREE.Vector3(gate.x, gate.z, -gate.y);
+        var dir = target.clone().sub(guideArrow.position).normalize();
+        guideArrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      }
+
+      /// Recebe circuito e índice do portal ativo do Flutter.
+      window.updateRaceState = function (payload) {
+        var data = payload;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            console.error('Falha ao ler o circuito:', e);
+            return;
+          }
+        }
+        if (!data) return;
+
+        raceModeOn = !!data.mode && data.mode !== 'freeFlight';
+        raceActiveIndex = Number(data.activeIndex) || 0;
+
+        clearRaceGates();
+        var gates = data.gates || [];
+        for (var i = 0; i < gates.length; i++) {
+          raceGates.push(gates[i]);
+        }
+
+        if (!raceModeOn) {
+          if (guideArrow) guideArrow.visible = false;
+          return;
+        }
+
+        for (var j = 0; j < raceGates.length; j++) {
+          var isActive = j === raceActiveIndex;
+          var isNext = j === raceActiveIndex + 1;
+          if (!isActive && !isNext) continue;
+          buildRaceGate(raceGates[j], isActive, isNext);
+        }
+      };
+
       // ── Loop de Renderização e Animação ──
       var lastFrameTime = performance.now();
 
@@ -1038,6 +1156,11 @@
         }
 
         updateCrashParticles(frameDt);
+        updateGuideArrow();
+        if (raceModeOn && raceGroup.children.length > 0) {
+          var pulse = 1.0 + 0.06 * Math.sin(performance.now() / 180.0);
+          raceGroup.children[0].scale.setScalar(pulse);
+        }
 
         // LED de crash pisca rápido em vermelho
         crashLed.visible = !droneState.isCrashed ||
