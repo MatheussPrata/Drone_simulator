@@ -173,11 +173,12 @@ class _World3dViewState extends State<World3dView> {
   }
 
   void _syncStateTo3d() {
-    if (!_isPageLoaded || _isSending || _webViewController == null) return;
+    if (!_isPageLoaded || _webViewController == null) return;
 
     _pushObstacleLayout();
     _pushRaceState();
 
+    if (_isSending) return;
     _isSending = true;
     final payload = _buildStatePayload();
     _webViewController!

@@ -57,6 +57,7 @@ class WorldGenerator {
     final list = generateFor(map).map((o) => o.toJson()).toList();
     return jsonEncode({
       'scenario': scenario.name,
+      'label': map.name,
       'theme': themeFor(scenario),
       'obstacles': list,
     });

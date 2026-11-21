@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:drone_simulator/models/flight_map.dart';
@@ -187,14 +188,10 @@ class RaceCourse {
     return z;
   }
 
-  /// Serializa o circuito para envio ao Three.js.
-  String toJsonString() {
-    final buffer = StringBuffer('{"mapId":"$mapId","name":"$name","gates":[');
-    for (var i = 0; i < gates.length; i++) {
-      if (i > 0) buffer.write(',');
-      buffer.write(gates[i].toJson().toString());
-    }
-    buffer.write(']}');
-    return buffer.toString();
-  }
+  /// Serializa o circuito para envio ao Three.js (JSON válido).
+  String toJsonString() => jsonEncode({
+        'mapId': mapId,
+        'name': name,
+        'gates': gates.map((g) => g.toJson()).toList(),
+      });
 }

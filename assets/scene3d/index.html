@@ -510,6 +510,21 @@
       };
 
       /// Recarrega o cenário completo (tema do terreno/céu/água + obstáculos).
+      var mapBannerEl = document.createElement('div');
+      mapBannerEl.className = 'map-banner';
+      document.body.appendChild(mapBannerEl);
+      var mapBannerTimer = null;
+
+      window.showMapBanner = function (name) {
+        if (!name) return;
+        mapBannerEl.textContent = name;
+        mapBannerEl.classList.add('visible');
+        if (mapBannerTimer) clearTimeout(mapBannerTimer);
+        mapBannerTimer = setTimeout(function () {
+          mapBannerEl.classList.remove('visible');
+        }, 2600);
+      };
+
       window.loadMapScenario = function (payload) {
         var data = payload;
         if (typeof data === 'string') {
@@ -523,6 +538,7 @@
         if (!data) return;
         applyScenarioTheme(data.theme);
         window.loadWorldObstacles(data);
+        if (data.label) window.showMapBanner(data.label);
       };
 
       // ── Barreira Geofence e Zonas No-Fly ──
@@ -1020,21 +1036,38 @@
       }
 
       function buildRaceGate(gate, isActive, isNext) {
-        var color = isActive ? 0x00e5ff : (isNext ? 0x33dd66 : 0x557788);
+        var color = isActive ? 0x00e5ff : (isNext ? 0x33dd66 : 0x88a0b4);
         var mat = new THREE.MeshBasicMaterial({
           color: color,
           transparent: true,
-          opacity: isActive ? 0.95 : (isNext ? 0.42 : 0.18),
+          opacity: isActive ? 1.0 : (isNext ? 0.55 : 0.22),
           side: THREE.DoubleSide
         });
         var ring = new THREE.Mesh(
-          new THREE.TorusGeometry(gate.radius, isActive ? 0.32 : 0.18, 8, 40),
+          new THREE.TorusGeometry(gate.radius, isActive ? 0.5 : 0.22, 10, 48),
           mat
         );
         ring.position.set(gate.x, gate.z, -gate.y);
         ring.rotation.y = (gate.yaw * Math.PI / 180.0) + Math.PI;
-        ring.visible = isActive || isNext;
+        ring.visible = true;
         raceGroup.add(ring);
+
+        if (isActive) {
+          // Halo externo translúcido para destacar o portal ativo à distância.
+          var haloMat = new THREE.MeshBasicMaterial({
+            color: 0x00e5ff,
+            transparent: true,
+            opacity: 0.28,
+            side: THREE.DoubleSide
+          });
+          var halo = new THREE.Mesh(
+            new THREE.TorusGeometry(gate.radius + 1.1, 0.9, 8, 40),
+            haloMat
+          );
+          halo.position.copy(ring.position);
+          halo.rotation.copy(ring.rotation);
+          raceGroup.add(halo);
+        }
 
         if (isActive) {
           // Setas luminosas ao redor do anel ativo.
@@ -1115,7 +1148,6 @@
         for (var j = 0; j < raceGates.length; j++) {
           var isActive = j === raceActiveIndex;
           var isNext = j === raceActiveIndex + 1;
-          if (!isActive && !isNext) continue;
           buildRaceGate(raceGates[j], isActive, isNext);
         }
       };

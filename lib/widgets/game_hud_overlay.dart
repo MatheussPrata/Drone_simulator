@@ -60,7 +60,20 @@ class GameHudOverlay extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.cyanAccent.withOpacity(0.55)),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${controller.raceCourse?.name ?? 'CORRIDA'} · '
+            '${controller.activeMap.name.toUpperCase()}',
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 9,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           _metric('PORTAL', '$gateNumber/$total', Colors.cyanAccent),
@@ -78,6 +91,8 @@ class GameHudOverlay extends StatelessWidget {
             _divider(),
             _metric('COMBO', 'x$combo', Colors.deepOrangeAccent),
           ],
+        ],
+          ),
         ],
       ),
     );

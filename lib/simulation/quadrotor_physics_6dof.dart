@@ -674,10 +674,16 @@ class QuadrotorPhysicsEngine {
         break;
 
       case FlightControlMode.acro:
-        // Taxas diretas: sem auto-nivelamento (permite flips completos).
-        targetPitchRate = -stickPitch * 5.5;
-        targetRollRate = stickRoll * 5.5;
-        targetYawRate = -stickYaw * 3.0;
+        // Taxas diretas com expo: resposta fina no centro do stick e taxa
+        // máxima moderada (~155°/s), sem o drone girar descontrolado.
+        double expo(double v) {
+          final magnitude = math.pow(v.abs(), 1.9).toDouble();
+          return (v < 0 ? -magnitude : magnitude) * 2.2;
+        }
+
+        targetPitchRate = -expo(stickPitch);
+        targetRollRate = expo(stickRoll);
+        targetYawRate = -expo(stickYaw) * 0.65;
 
         // Throttle manual: -1 = motores em marcha lenta (gravidade domina).
         collectiveNormalized = (stickThrottle + 1.0) * 0.5;
