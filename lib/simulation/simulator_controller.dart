@@ -4,10 +4,15 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:drone_simulator/simulation/flight_physics.dart';
 import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
+import 'package:drone_simulator/models/race_course.dart';
+import 'package:drone_simulator/simulation/race_manager.dart';
 
 export 'package:drone_simulator/models/drone_state.dart' show CameraViewMode;
 export 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart'
     show FlightControlMode, Vec3, PhysicsSnapshot, PilotStickInput;
+
+/// Modo de jogo do simulador.
+enum SimulatorMode { freeFlight, gateRace }
 
 /// Status operacional do simulador de voo.
 enum SimulatorStatus {
@@ -64,6 +69,8 @@ class SimulatorController extends ChangeNotifier {
   bool _isMapPrimaryView = false;
   bool _isSatellite = true;
   FlightControlMode _flightMode = FlightControlMode.stabilized;
+  SimulatorMode _simulatorMode = SimulatorMode.freeFlight;
+  RaceManager? _raceManager;
 
   double _manualThrottle = 0.0;
   double _manualYaw = 0.0;
@@ -126,6 +133,11 @@ class SimulatorController extends ChangeNotifier {
   /// Instante do último crash.
   DateTime? get lastCrashTimestamp => _lastCrashTimestamp;
 
+  SimulatorMode get simulatorMode => _simulatorMode;
+  bool get isRaceMode => _simulatorMode == SimulatorMode.gateRace;
+  RaceManager? get raceManager => _raceManager;
+  RaceCourse? get raceCourse => _raceManager?.course;
+
   FlightControlMode get flightMode => _flightMode;
   String get flightModeLabel {
     switch (_flightMode) {
@@ -174,6 +186,33 @@ class SimulatorController extends ChangeNotifier {
       crashImpactSpeedKmh: _crashImpactSpeedKmh,
       lastCrashTimestamp: _lastCrashTimestamp,
     );
+  }
+
+  /// Alterna entre Voo Livre e Modo Jogo (corrida de portais).
+  void toggleSimulatorMode() {
+    if (_simulatorMode == SimulatorMode.freeFlight) {
+      _simulatorMode = SimulatorMode.gateRace;
+      _raceManager = RaceManager(course: RaceCourse.forMap(activeMap))..start();
+      resetRace();
+    } else {
+      _simulatorMode = SimulatorMode.freeFlight;
+      _raceManager = null;
+    }
+    notifyListeners();
+  }
+
+  /// Reinicia a corrida atual no mesmo circuito.
+  void restartRace() {
+    _raceManager ??= RaceManager(course: RaceCourse.forMap(activeMap));
+    _raceManager!.restart();
+    reset();
+    notifyListeners();
+  }
+
+  /// Reseta o voo mantendo o circuito atual.
+  void resetRace() {
+    reset();
+    notifyListeners();
   }
 
   /// Alterna entre NORMAL → SPORT → ACRO.
@@ -243,6 +282,9 @@ class SimulatorController extends ChangeNotifier {
     physics.selectMap(map);
     _applyMapWind(map);
     reset();
+    if (_simulatorMode == SimulatorMode.gateRace) {
+      _raceManager = RaceManager(course: RaceCourse.forMap(map))..start();
+    }
   }
 
   /// Configura vento e turbulência específicos de cada cenário.
@@ -474,6 +516,18 @@ class SimulatorController extends ChangeNotifier {
 
     if (_status == SimulatorStatus.crashed) {
       _crashTimer += dt;
+    }
+
+    final race = _raceManager;
+    if (race != null && _simulatorMode == SimulatorMode.gateRace) {
+      race.update(
+        dt: dt,
+        x: _x,
+        y: _y,
+        z: _z,
+        speedKmh: _speedKmh,
+        crashed: _status == SimulatorStatus.crashed,
+      );
     }
     _impactShake = max(0.0, _impactShake - dt * 1.5);
     notifyListeners();

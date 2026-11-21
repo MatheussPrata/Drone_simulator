@@ -140,8 +140,21 @@ class RaceCourse {
   ) {
     final gates = <RaceGate>[];
     for (var i = 0; i < candidates.length; i++) {
-      final (x, y, baseZ) = candidates[i];
+      final (baseX, baseY, baseZ) = candidates[i];
+      var x = baseX;
+      var y = baseY;
       var z = _freeHeight(x, y, baseZ, obstacles);
+
+      // Se a altura necessária estourar o teto de 45 m, reposiciona o portal
+      // sobre a via/trilha mais próxima (eixo livre de construções).
+      if (z > 45.0) {
+        if (x.abs() > y.abs()) {
+          y = 0.0;
+        } else {
+          x = 0.0;
+        }
+        z = _freeHeight(x, y, baseZ, obstacles);
+      }
       if (z > 45.0) z = 45.0;
 
       final next = candidates[(i + 1) % candidates.length];
