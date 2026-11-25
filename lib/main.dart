@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:drone_simulator/models/drone_profile.dart';
+import 'package:drone_simulator/models/flight_map.dart';
+import 'package:drone_simulator/services/records_repository.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
+import 'package:drone_simulator/ui/screens/home_menu_screen.dart';
 import 'package:drone_simulator/widgets/fpv_osd_overlay.dart';
 import 'package:drone_simulator/widgets/game_hud_overlay.dart';
 import 'package:drone_simulator/widgets/gimbal_slider.dart';
@@ -17,11 +21,18 @@ void main() {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
-  runApp(const DroneSimulatorApp());
+  runApp(const DroneSimulatorApp(showHomeOnStart: true));
 }
 
 class DroneSimulatorApp extends StatelessWidget {
-  const DroneSimulatorApp({super.key});
+  final bool showHomeOnStart;
+  final RecordsRepository? recordsRepository;
+
+  const DroneSimulatorApp({
+    super.key,
+    this.showHomeOnStart = false,
+    this.recordsRepository,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -36,13 +47,38 @@ class DroneSimulatorApp extends StatelessWidget {
           surface: Color(0xFF1E2630),
         ),
       ),
-      home: const FlightSimulatorScreen(),
+      home: showHomeOnStart
+          ? HomeMenuScreen(recordsRepository: recordsRepository)
+          : const FlightSimulatorScreen(),
     );
   }
 }
 
 class FlightSimulatorScreen extends StatefulWidget {
-  const FlightSimulatorScreen({super.key});
+  final SimulatorMode initialMode;
+  final FlightMap? initialMap;
+  final DroneProfile? initialProfile;
+  final FlightControlMode initialFlightMode;
+  final TimeOfDayPreset initialTimeOfDay;
+  final AcroSettings? initialAcroSettings;
+  final bool initialAudioEnabled;
+  final bool initialHapticsEnabled;
+  final bool initialGhostEnabled;
+  final RecordsRepository? recordsRepository;
+
+  const FlightSimulatorScreen({
+    super.key,
+    this.initialMode = SimulatorMode.freeFlight,
+    this.initialMap,
+    this.initialProfile,
+    this.initialFlightMode = FlightControlMode.stabilized,
+    this.initialTimeOfDay = TimeOfDayPreset.day,
+    this.initialAcroSettings,
+    this.initialAudioEnabled = true,
+    this.initialHapticsEnabled = true,
+    this.initialGhostEnabled = true,
+    this.recordsRepository,
+  });
 
   @override
   State<FlightSimulatorScreen> createState() => _FlightSimulatorScreenState();
@@ -56,8 +92,41 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = SimulatorController()..start();
+    _controller = SimulatorController(records: widget.recordsRepository);
+    if (widget.initialAcroSettings != null) {
+      _controller.setAcroSettings(widget.initialAcroSettings!);
+    }
+    _controller.setAudioEnabled(widget.initialAudioEnabled);
+    _controller.setHapticsEnabled(widget.initialHapticsEnabled);
+    _controller.setGhostEnabled(widget.initialGhostEnabled);
+
+    if (widget.initialMap != null ||
+        widget.initialProfile != null ||
+        widget.initialMode != SimulatorMode.freeFlight ||
+        widget.initialFlightMode != FlightControlMode.stabilized ||
+        widget.initialTimeOfDay != TimeOfDayPreset.day) {
+      _controller.configureSession(
+        mode: widget.initialMode,
+        map: widget.initialMap ?? FlightMap.dronePark,
+        profile: widget.initialProfile ?? DroneProfile.mini249g,
+        flightMode: widget.initialFlightMode,
+        timeOfDay: widget.initialTimeOfDay,
+      );
+    }
+    _controller.start();
     _controller.addListener(_onControllerTick);
+  }
+
+  void _openHomeMenu() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => HomeMenuScreen(recordsRepository: _controller.records),
+        ),
+      );
+    }
   }
 
   void _onControllerTick() {
@@ -125,12 +194,16 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
             child: TelemetryHud(
               controller: _controller,
               actionsPlacement: HudActionsPlacement.top,
+              onOpenHomeMenu: _openHomeMenu,
             ),
           ),
 
           // ── Camada 4.5: HUD do Modo Jogo + Cards de Queda/Vitória ──
           Positioned.fill(
-            child: GameHudOverlay(controller: _controller),
+            child: GameHudOverlay(
+              controller: _controller,
+              onOpenHomeMenu: _openHomeMenu,
+            ),
           ),
 
           // ── Camada 5: Joystick Esquerdo Modo 2 (Throttle / Yaw) - Translúcido ──

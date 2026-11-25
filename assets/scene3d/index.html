@@ -30,6 +30,29 @@
       width: 100% !important;
       height: 100% !important;
     }
+    .map-banner {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      background: rgba(10, 16, 24, 0.82);
+      border: 1px solid rgba(0, 229, 255, 0.55);
+      color: #e6f7ff;
+      padding: 6px 16px;
+      border-radius: 999px;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.9px;
+      text-transform: uppercase;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+    }
+    .map-banner.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -51,6 +74,10 @@
         visualRoll: 0.0,
         gimbalPitch: 0.0,
         cameraMode: 'fpv', // 'fpv' ou 'thirdPerson'
+        flightMode: 'stabilized',
+        fpvUptiltDeg: 12.0,
+        audioEnabled: true,
+        speedKmh: 0.0,
         flying: false,
         battery: 100.0,
         impactShake: 0.0,
@@ -58,10 +85,151 @@
         pitchRad: 0.0,
         rollRad: 0.0,
         yawRad: 0.0,
+        qx: 0.0,
+        qy: 0.0,
+        qz: 0.0,
+        qw: 1.0,
+        ghost: { active: false },
         isCrashed: false,
         crashImpactSpeedKmh: 0.0,
         isArmed: false,
         status: 'landed'
+      };
+
+      var currentScenario = 'urban';
+      var currentTheme = { sky: '#8cb5df', fogDensity: 0.0015, ground: '#ffffff', water: false };
+      var currentLightingPreset = 'day';
+
+      // ── Sintetizador Web Audio Offline (motores + efeitos de jogo) ──
+      var AudioEngine = (function () {
+        var ctx = null;
+        var masterGain = null;
+        var motorGain = null;
+        var oscMain = null;
+        var oscSub = null;
+        var initialized = false;
+
+        function ensureInit() {
+          if (initialized) return true;
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return false;
+          try {
+            ctx = new AC();
+            masterGain = ctx.createGain();
+            masterGain.gain.value = 0.25;
+            masterGain.connect(ctx.destination);
+
+            motorGain = ctx.createGain();
+            motorGain.gain.value = 0.0;
+
+            var filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 520;
+            motorGain.connect(filter);
+            filter.connect(masterGain);
+
+            oscMain = ctx.createOscillator();
+            oscMain.type = 'sawtooth';
+            oscMain.frequency.value = 95;
+            oscMain.connect(motorGain);
+            oscMain.start();
+
+            oscSub = ctx.createOscillator();
+            oscSub.type = 'triangle';
+            oscSub.frequency.value = 190;
+            var subGain = ctx.createGain();
+            subGain.gain.value = 0.35;
+            oscSub.connect(subGain);
+            subGain.connect(motorGain);
+            oscSub.start();
+
+            initialized = true;
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+
+        function resumeIfNeeded() {
+          if (!ctx && droneState.audioEnabled) ensureInit();
+          if (ctx && ctx.state === 'suspended') {
+            ctx.resume().catch(function () {});
+          }
+        }
+
+        function updateMotors(motors, isArmed, isCrashed, enabled) {
+          if (!enabled || !isArmed || isCrashed) {
+            if (motorGain && ctx) {
+              motorGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.06);
+            }
+            return;
+          }
+          resumeIfNeeded();
+          if (!initialized || !ctx) return;
+
+          var avg = ((motors[0] || 0) + (motors[1] || 0) + (motors[2] || 0) + (motors[3] || 0)) * 0.25;
+          var spread = Math.abs((motors[0] || 0) - (motors[1] || 0)) + Math.abs((motors[2] || 0) - (motors[3] || 0));
+          var freq = 88 + avg * 210 + spread * 45;
+          var vol = 0.04 + avg * 0.14;
+          oscMain.frequency.setTargetAtTime(freq, ctx.currentTime, 0.04);
+          oscSub.frequency.setTargetAtTime(freq * 1.98, ctx.currentTime, 0.04);
+          motorGain.gain.setTargetAtTime(vol, ctx.currentTime, 0.05);
+        }
+
+        function playTone(freq, duration, type, gainVal, slideTo) {
+          resumeIfNeeded();
+          if (!initialized || !ctx || !droneState.audioEnabled) return;
+          try {
+            var now = ctx.currentTime;
+            var osc = ctx.createOscillator();
+            var g = ctx.createGain();
+            osc.type = type || 'sine';
+            osc.frequency.setValueAtTime(freq, now);
+            if (slideTo) {
+              osc.frequency.exponentialRampToValueAtTime(Math.max(30, slideTo), now + duration);
+            }
+            g.gain.setValueAtTime(gainVal || 0.2, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            osc.connect(g);
+            g.connect(masterGain);
+            osc.start(now);
+            osc.stop(now + duration + 0.02);
+          } catch (e) {}
+        }
+
+        function triggerEffect(kind, value) {
+          if (!droneState.audioEnabled) return;
+          switch (kind) {
+            case 'gate':
+              var baseFreq = 520 + Math.min(6, Number(value) || 1) * 75;
+              playTone(baseFreq, 0.12, 'triangle', 0.28, baseFreq * 1.35);
+              break;
+            case 'trick':
+              playTone(620, 0.10, 'sine', 0.22, 880);
+              setTimeout(function () { playTone(920, 0.16, 'triangle', 0.22, 1180); }, 70);
+              break;
+            case 'warning':
+              playTone(760, 0.09, 'square', 0.12, 620);
+              break;
+            case 'crash':
+              playTone(150, 0.32, 'sawtooth', 0.35, 38);
+              break;
+            case 'finish':
+              playTone(523, 0.14, 'triangle', 0.24);
+              setTimeout(function () { playTone(659, 0.14, 'triangle', 0.24); }, 110);
+              setTimeout(function () { playTone(784, 0.28, 'triangle', 0.28); }, 220);
+              break;
+          }
+        }
+
+        return {
+          updateMotors: updateMotors,
+          triggerEffect: triggerEffect
+        };
+      })();
+
+      window.triggerSoundEffect = function (kind, value) {
+        AudioEngine.triggerEffect(kind, value);
       };
 
       // ── Cena, Câmera e Renderizador Three.js ──
@@ -70,7 +238,7 @@
       scene.background = new THREE.Color(0x8cb5df);
       scene.fog = new THREE.FogExp2(0x8cb5df, 0.0015);
 
-      var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+      var camera = new THREE.PerspectiveCamera(64, window.innerWidth / window.innerHeight, 0.1, 2200);
       camera.rotation.order = 'YXZ';
       camera.position.set(0, 1.8, 4.5);
 
@@ -87,7 +255,7 @@
       renderer.toneMappingExposure = 1.05;
       container.appendChild(renderer.domElement);
 
-      // ── Iluminação Atmosférica ──
+      // ── Iluminação Atmosférica e Ciclo Dia/Pôr do Sol/Noite ──
       var hemiLight = new THREE.HemisphereLight(0xdff0ff, 0x3d502a, 0.65);
       hemiLight.position.set(0, 500, 0);
       scene.add(hemiLight);
@@ -106,94 +274,131 @@
       sunLight.shadow.bias = -0.0003;
       scene.add(sunLight);
 
-      // ── Geração Procedural da Textura do Terreno (Grama + Estradas + Pista) ──
-      function createGroundTexture() {
+      var droneHeadlight = new THREE.PointLight(0xdff6ff, 0.0, 48, 1.6);
+      scene.add(droneHeadlight);
+
+      // ── Texturas Procedurais Específicas por Cenário ──
+      var groundTextureCache = {};
+
+      function createGroundTexture(scenario) {
+        if (groundTextureCache[scenario]) return groundTextureCache[scenario];
+
         var size = 2048;
         var canvas = document.createElement('canvas');
         canvas.width = size;
         canvas.height = size;
         var ctx = canvas.getContext('2d');
-
-        var grad = ctx.createRadialGradient(size / 2, size / 2, 50, size / 2, size / 2, size * 0.7);
-        grad.addColorStop(0, '#588a3e');
-        grad.addColorStop(0.5, '#4f7d37');
-        grad.addColorStop(1, '#446e2f');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, size, size);
-
-        ctx.fillStyle = 'rgba(70, 110, 40, 0.25)';
-        for (var i = 0; i < 200; i++) {
-          var rx = (Math.sin(i * 997) * 0.5 + 0.5) * size;
-          var ry = (Math.cos(i * 613) * 0.5 + 0.5) * size;
-          var rw = 30 + ((i * 17) % 80);
-          var rh = 20 + ((i * 31) % 60);
-          ctx.beginPath();
-          ctx.ellipse(rx, ry, rw, rh, (i * 0.4), 0, Math.PI * 2);
-          ctx.fill();
-        }
-
         var scale = size / 1600.0;
         var centerX = size / 2;
         var centerY = size / 2;
 
-        var runwayWidth = 240 * scale;
-        var runwayHeight = 36 * scale;
-        var runwayX = centerX - runwayWidth / 2;
-        var runwayY = centerY - 140 * scale;
+        if (scenario === 'forest') {
+          var fGrad = ctx.createRadialGradient(centerX, centerY, 40, centerX, centerY, size * 0.7);
+          fGrad.addColorStop(0, '#4e7f34');
+          fGrad.addColorStop(0.45, '#3f6d2b');
+          fGrad.addColorStop(1, '#2f5620');
+          ctx.fillStyle = fGrad;
+          ctx.fillRect(0, 0, size, size);
 
-        ctx.fillStyle = '#4a5057';
-        ctx.fillRect(runwayX, runwayY, runwayWidth, runwayHeight);
+          for (var fi = 0; fi < 280; fi++) {
+            var fx = (Math.sin(fi * 887) * 0.5 + 0.5) * size;
+            var fy = (Math.cos(fi * 541) * 0.5 + 0.5) * size;
+            ctx.fillStyle = fi % 2 === 0 ? 'rgba(85, 130, 50, 0.26)' : 'rgba(42, 78, 26, 0.25)';
+            ctx.beginPath();
+            ctx.ellipse(fx, fy, 26 + (fi % 70), 20 + (fi % 55), fi * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
 
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2 * scale;
-        ctx.strokeRect(runwayX + 2, runwayY + 2, runwayWidth - 4, runwayHeight - 4);
+          // Trilhas de terra em cruz + clareira central natural
+          ctx.fillStyle = '#8b6d4b';
+          var trailW = 16 * scale;
+          ctx.fillRect(centerX - trailW / 2, 0, trailW, size);
+          ctx.fillRect(0, centerY - trailW / 2, size, trailW);
 
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2 * scale;
-        ctx.setLineDash([8 * scale, 6 * scale]);
-        ctx.beginPath();
-        ctx.moveTo(runwayX + 15 * scale, runwayY + runwayHeight / 2);
-        ctx.lineTo(runwayX + runwayWidth - 15 * scale, runwayY + runwayHeight / 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          ctx.strokeStyle = '#7b5f40';
+          ctx.lineWidth = 10 * scale;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 210 * scale, 0, Math.PI * 2);
+          ctx.stroke();
 
-        var roadWidth = 18 * scale;
-        ctx.fillStyle = '#32363b';
-        ctx.fillRect(centerX - roadWidth / 2, 0, roadWidth, size);
-        ctx.fillRect(0, centerY - roadWidth / 2, size, roadWidth);
+          ctx.fillStyle = '#9a7e5a';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 28 * scale, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (scenario === 'canyon') {
+          var cGrad = ctx.createRadialGradient(centerX, centerY, 50, centerX, centerY, size * 0.72);
+          cGrad.addColorStop(0, '#c89b6e');
+          cGrad.addColorStop(0.55, '#b68558');
+          cGrad.addColorStop(1, '#8c5f3c');
+          ctx.fillStyle = cGrad;
+          ctx.fillRect(0, 0, size, size);
 
-        var ringRadius = 240 * scale;
-        ctx.strokeStyle = '#32363b';
-        ctx.lineWidth = 12 * scale;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, ringRadius, 0, Math.PI * 2);
-        ctx.stroke();
+          for (var ci = 0; ci < 240; ci++) {
+            var cx = (Math.sin(ci * 733) * 0.5 + 0.5) * size;
+            var cy = (Math.cos(ci * 499) * 0.5 + 0.5) * size;
+            ctx.fillStyle = ci % 2 === 0 ? 'rgba(155, 102, 62, 0.25)' : 'rgba(218, 178, 132, 0.22)';
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, 40 + (ci % 90), 18 + (ci % 40), ci * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+          }
 
-        ctx.strokeStyle = '#e6b800';
-        ctx.lineWidth = 1.5 * scale;
-        ctx.setLineDash([6 * scale, 6 * scale]);
+          // Plataforma arenosa e pátio de concreto junto à barragem
+          ctx.fillStyle = '#d7b98e';
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, 55 * scale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#7e8388';
+          ctx.fillRect(centerX - 360 * scale, centerY - 310 * scale, 48 * scale, 620 * scale);
+        } else {
+          // Distrito Urbano: quadras de concreto, avenidas asfaltadas e parques verdes
+          ctx.fillStyle = '#4e565e';
+          ctx.fillRect(0, 0, size, size);
 
-        ctx.beginPath();
-        ctx.moveTo(centerX, 0);
-        ctx.lineTo(centerX, size);
-        ctx.stroke();
+          for (var ui = 0; ui < 16; ui++) {
+            for (var uj = 0; uj < 16; uj++) {
+              var bx = ui * (size / 16) + 8;
+              var by = uj * (size / 16) + 8;
+              var bw = size / 16 - 16;
+              ctx.fillStyle = ((ui + uj) % 5 === 0) ? '#4b7843' : '#636c75';
+              ctx.fillRect(bx, by, bw, bw);
+            }
+          }
 
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(size, centerY);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          var roadW = 24 * scale;
+          ctx.fillStyle = '#25292e';
+          ctx.fillRect(centerX - roadW / 2, 0, roadW, size);
+          ctx.fillRect(0, centerY - roadW / 2, size, roadW);
+
+          var ringRadius = 240 * scale;
+          ctx.strokeStyle = '#25292e';
+          ctx.lineWidth = 16 * scale;
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, ringRadius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#e6b800';
+          ctx.lineWidth = 2.0 * scale;
+          ctx.setLineDash([8 * scale, 8 * scale]);
+          ctx.beginPath();
+          ctx.moveTo(centerX, 0);
+          ctx.lineTo(centerX, size);
+          ctx.moveTo(0, centerY);
+          ctx.lineTo(size, centerY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
 
         var texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
+        groundTextureCache[scenario] = texture;
         return texture;
       }
 
       var groundGeo = new THREE.PlaneGeometry(1600, 1600);
       groundGeo.rotateX(-Math.PI / 2);
       var groundMat = new THREE.MeshStandardMaterial({
-        map: createGroundTexture(),
+        map: createGroundTexture('urban'),
         roughness: 0.88,
         metalness: 0.08
       });
@@ -203,40 +408,93 @@
 
       var gridHelper = new THREE.GridHelper(1600, 80, 0x6e9060, 0x5a7850);
       gridHelper.position.y = 0.02;
+      gridHelper.material.transparent = true;
+      gridHelper.material.opacity = 0.25;
       scene.add(gridHelper);
 
       // ── Espelho d'água da represa (visível só no cenário Cânion & Represa) ──
-      var waterGeo = new THREE.PlaneGeometry(900, 560);
+      var waterGeo = new THREE.PlaneGeometry(920, 580, 24, 16);
       waterGeo.rotateX(-Math.PI / 2);
       var waterMat = new THREE.MeshStandardMaterial({
         color: 0x1d6f8f,
         transparent: true,
-        opacity: 0.88,
+        opacity: 0.86,
         roughness: 0.12,
-        metalness: 0.45
+        metalness: 0.55
       });
       var waterMesh = new THREE.Mesh(waterGeo, waterMat);
-      waterMesh.position.set(0, 0.07, 280);
+      waterMesh.position.set(10, 0.09, 250);
       waterMesh.receiveShadow = true;
       waterMesh.visible = false;
       scene.add(waterMesh);
 
-      /// Aplica céu, neblina, cor do solo e água do cenário escolhido.
-      function applyScenarioTheme(theme) {
-        if (!theme) return;
-        var skyColor = new THREE.Color(theme.sky || '#8cb5df');
-        scene.background = skyColor;
-        if (scene.fog) {
-          scene.fog.color.copy(skyColor);
-          if (typeof theme.fogDensity === 'number') {
-            scene.fog.density = theme.fogDensity;
+      function applyLightingAndTheme() {
+        var baseSky = new THREE.Color(currentTheme.sky || '#8cb5df');
+        var baseFogDensity = typeof currentTheme.fogDensity === 'number' ? currentTheme.fogDensity : 0.0015;
+
+        if (currentLightingPreset === 'night') {
+          scene.background = new THREE.Color(0x0b1526);
+          if (scene.fog) {
+            scene.fog.color.setHex(0x0b1526);
+            scene.fog.density = baseFogDensity * 1.45;
           }
+          hemiLight.color.setHex(0x3a588a);
+          hemiLight.groundColor.setHex(0x101820);
+          hemiLight.intensity = 0.35;
+          sunLight.color.setHex(0x8db0e0);
+          sunLight.intensity = 0.42;
+          sunLight.position.set(-140, 260, -160);
+          renderer.toneMappingExposure = 0.92;
+          gridHelper.material.opacity = 0.14;
+        } else if (currentLightingPreset === 'sunset') {
+          var sunsetSky = baseSky.clone().lerp(new THREE.Color(0xe88d5d), 0.65);
+          scene.background = sunsetSky;
+          if (scene.fog) {
+            scene.fog.color.copy(sunsetSky);
+            scene.fog.density = baseFogDensity * 1.25;
+          }
+          hemiLight.color.setHex(0xffc99e);
+          hemiLight.groundColor.setHex(0x473026);
+          hemiLight.intensity = 0.58;
+          sunLight.color.setHex(0xff9c52);
+          sunLight.intensity = 1.35;
+          sunLight.position.set(-280, 120, 220);
+          renderer.toneMappingExposure = 1.08;
+          gridHelper.material.opacity = 0.22;
+        } else {
+          scene.background = baseSky;
+          if (scene.fog) {
+            scene.fog.color.copy(baseSky);
+            scene.fog.density = baseFogDensity;
+          }
+          hemiLight.color.setHex(0xdff0ff);
+          hemiLight.groundColor.setHex(0x3d502a);
+          hemiLight.intensity = 0.65;
+          sunLight.color.setHex(0xfffaee);
+          sunLight.intensity = 1.25;
+          sunLight.position.set(160, 340, 180);
+          renderer.toneMappingExposure = 1.05;
+          gridHelper.material.opacity = 0.25;
         }
+      }
+
+      window.setLightingPreset = function (preset) {
+        currentLightingPreset = preset || 'day';
+        applyLightingAndTheme();
+      };
+
+      /// Aplica céu, neblina, cor do solo e água do cenário escolhido.
+      function applyScenarioTheme(theme, scenario) {
+        if (theme) currentTheme = theme;
+        if (scenario) currentScenario = scenario;
+
         if (ground && ground.material) {
-          ground.material.color.set(theme.ground || '#ffffff');
+          ground.material.map = createGroundTexture(currentScenario);
+          ground.material.color.set('#ffffff');
           ground.material.needsUpdate = true;
         }
-        waterMesh.visible = !!theme.water;
+        waterMesh.visible = !!(theme && theme.water);
+        applyLightingAndTheme();
       }
 
       // ── Heliponto Home (0, 0, 0) com "H" Amarelo e Balizamento ──
@@ -311,9 +569,11 @@
       }
       createHelipad();
 
-      // ── Obstáculos vindos do Flutter (fonte única Dart ↔ 3D) ──
+      // ── Obstáculos e Props Decorativos do Cenário ──
       var obstaclesGroup = new THREE.Group();
       scene.add(obstaclesGroup);
+      var scenarioPropsGroup = new THREE.Group();
+      scene.add(scenarioPropsGroup);
 
       var buildingColors = [0x4a6572, 0x34495e, 0x2c3e50, 0x5d6d7e, 0x7f8c8d, 0x95a5a6, 0x3a4b53, 0x2e4053];
       var roofColors = [0x22313f, 0x1a252f, 0x283747, 0x212f3d];
@@ -339,7 +599,7 @@
             var x = padX + c * (w + padX);
             var y = padY + r * (h + padY);
             var lightUp = ((r * 7 + c * 3 + litOffset) % 5) < 2;
-            ctx.fillStyle = lightUp ? 'rgba(255, 240, 180, 0.75)' : 'rgba(30, 45, 60, 0.85)';
+            ctx.fillStyle = lightUp ? 'rgba(255, 240, 170, 0.85)' : 'rgba(24, 38, 52, 0.90)';
             ctx.fillRect(x, y, w, h);
           }
         }
@@ -359,21 +619,24 @@
 
       var foliageGeo1 = new THREE.ConeGeometry(2.8, 5.5, 6);
       var foliageGeo2 = new THREE.ConeGeometry(2.2, 4.2, 6);
+      var crownGeo = new THREE.DodecahedronGeometry(2.4, 1);
       var foliageMats = [
         new THREE.MeshStandardMaterial({ color: 0x2e6b2e, roughness: 0.8 }),
         new THREE.MeshStandardMaterial({ color: 0x3d7e3d, roughness: 0.8 }),
-        new THREE.MeshStandardMaterial({ color: 0x245824, roughness: 0.8 })
+        new THREE.MeshStandardMaterial({ color: 0x245824, roughness: 0.8 }),
+        new THREE.MeshStandardMaterial({ color: 0x548538, roughness: 0.8 })
       ];
 
-      var rockMat = new THREE.MeshStandardMaterial({ color: 0x6b6b6b, roughness: 0.95, flatShading: true });
+      var rockMat = new THREE.MeshStandardMaterial({ color: 0x7d6552, roughness: 0.95, flatShading: true });
       var concreteMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.85 });
+      var woodMat = new THREE.MeshStandardMaterial({ color: 0x7a5233, roughness: 0.88 });
       var roofMatCache = roofColors.map(function (c) {
         return new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 });
       });
 
-      function clearObstacles() {
-        while (obstaclesGroup.children.length > 0) {
-          var child = obstaclesGroup.children.pop();
+      function clearGroup(group) {
+        while (group.children.length > 0) {
+          var child = group.children.pop();
           if (child.geometry) child.geometry.dispose();
         }
       }
@@ -393,17 +656,31 @@
         var colorIdx = Math.abs(Math.round(o.x + o.y)) % buildingColors.length;
         var mat = new THREE.MeshStandardMaterial({
           map: facadeTextures[colorIdx],
-          roughness: 0.65,
-          metalness: 0.2
+          roughness: 0.62,
+          metalness: 0.22
         });
         addBox(o, mat);
 
         if (((Math.round(o.height) + Math.round(o.x)) % 3) !== 0) {
-          var roofGeo = new THREE.BoxGeometry(o.width * 0.4, 3, o.depth * 0.4);
+          var roofGeo = new THREE.BoxGeometry(o.width * 0.42, 3, o.depth * 0.42);
           var roof = new THREE.Mesh(roofGeo, roofMatCache[colorIdx % roofMatCache.length]);
           roof.position.set(o.x, o.height + 1.5, -o.y);
           roof.castShadow = true;
           obstaclesGroup.add(roof);
+        }
+        if (o.height > 58) {
+          var ant = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.28, 7.0, 6),
+            concreteMat
+          );
+          ant.position.set(o.x, o.height + 3.5, -o.y);
+          obstaclesGroup.add(ant);
+          var warn = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xff2222 })
+          );
+          warn.position.set(o.x, o.height + 7.1, -o.y);
+          obstaclesGroup.add(warn);
         }
       }
 
@@ -418,32 +695,45 @@
         trunk.castShadow = true;
         group.add(trunk);
 
-        var folMat = foliageMats[Math.abs(Math.round(o.x * 0.1 + o.y * 0.1)) % foliageMats.length];
-        var bottom = new THREE.Mesh(foliageGeo1, folMat);
-        bottom.position.y = 4.8;
-        bottom.castShadow = true;
-        group.add(bottom);
+        var seedIdx = Math.abs(Math.round(o.x * 0.1 + o.y * 0.1));
+        var folMat = foliageMats[seedIdx % foliageMats.length];
 
-        var top = new THREE.Mesh(foliageGeo2, folMat);
-        top.position.y = 7.2;
-        top.castShadow = true;
-        group.add(top);
+        if (currentScenario === 'forest' && (seedIdx % 3 === 0)) {
+          var crown = new THREE.Mesh(crownGeo, folMat);
+          crown.position.y = 5.4;
+          crown.scale.set(1.1, 1.25, 1.1);
+          crown.castShadow = true;
+          group.add(crown);
+        } else {
+          var bottom = new THREE.Mesh(foliageGeo1, folMat);
+          bottom.position.y = 4.8;
+          bottom.castShadow = true;
+          group.add(bottom);
+
+          var top = new THREE.Mesh(foliageGeo2, folMat);
+          top.position.y = 7.2;
+          top.castShadow = true;
+          group.add(top);
+        }
 
         obstaclesGroup.add(group);
       }
 
       function addTower(o) {
+        var isWood = currentScenario === 'forest';
         var sections = 6;
         var secH = o.height / sections;
         for (var s = 0; s < sections; s++) {
           var rTop = 2.4 * (1 - (s + 1) / (sections + 1));
           var rBot = 2.4 * (1 - s / (sections + 1));
           var geo = new THREE.CylinderGeometry(rTop, rBot, secH, 4, 1, true);
-          var mat = new THREE.MeshStandardMaterial({
-            color: s % 2 === 0 ? 0xdd3333 : 0xeeeeee,
-            metalness: 0.6,
-            roughness: 0.4
-          });
+          var mat = isWood
+            ? woodMat
+            : new THREE.MeshStandardMaterial({
+                color: s % 2 === 0 ? 0xdd3333 : 0xeeeeee,
+                metalness: 0.6,
+                roughness: 0.4
+              });
           var mesh = new THREE.Mesh(geo, mat);
           mesh.position.set(o.x, secH * (s + 0.5), -o.y);
           mesh.castShadow = true;
@@ -452,7 +742,7 @@
 
         var beacon = new THREE.Mesh(
           new THREE.SphereGeometry(0.6, 8, 8),
-          new THREE.MeshBasicMaterial({ color: 0xff0000 })
+          new THREE.MeshBasicMaterial({ color: isWood ? 0xffbb33 : 0xff0000 })
         );
         beacon.position.set(o.x, o.height + 0.5, -o.y);
         obstaclesGroup.add(beacon);
@@ -469,6 +759,70 @@
         obstaclesGroup.add(mesh);
       }
 
+      function populateScenarioProps(scenario) {
+        clearGroup(scenarioPropsGroup);
+
+        if (scenario === 'canyon') {
+          // Tabuleiro da ponte passando sobre os 6 pilares em y = -60 (Three.js z = +60, altura = 26)
+          var deckMat = new THREE.MeshStandardMaterial({ color: 0x626970, roughness: 0.85 });
+          var deck = new THREE.Mesh(new THREE.BoxGeometry(430, 1.4, 11), deckMat);
+          deck.position.set(-5, 26.6, 60);
+          deck.castShadow = true;
+          deck.receiveShadow = true;
+          scenarioPropsGroup.add(deck);
+
+          var railMat = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, metalness: 0.6 });
+          [-5.2, 5.2].forEach(function (rz) {
+            var rail = new THREE.Mesh(new THREE.BoxGeometry(430, 1.0, 0.3), railMat);
+            rail.position.set(-5, 27.8, 60 + rz);
+            scenarioPropsGroup.add(rail);
+          });
+
+          // Anel de paredões rochosos do cânion na borda externa (~525m)
+          var cliffMat = new THREE.MeshStandardMaterial({ color: 0x8f5b3c, roughness: 0.96, flatShading: true });
+          for (var c = 0; c < 24; c++) {
+            var ang = (c / 24) * Math.PI * 2;
+            var dist = 528;
+            var cw = 90 + (c % 3) * 28;
+            var ch = 46 + (c % 5) * 14;
+            var cliff = new THREE.Mesh(new THREE.ConeGeometry(cw, ch, 5), cliffMat);
+            cliff.position.set(Math.cos(ang) * dist, ch * 0.45, Math.sin(ang) * dist);
+            cliff.rotation.y = ang;
+            scenarioPropsGroup.add(cliff);
+          }
+
+          // Vertedouro branco na face da barragem
+          var spill = new THREE.Mesh(
+            new THREE.PlaneGeometry(80, 32),
+            new THREE.MeshBasicMaterial({ color: 0xdff5ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+          );
+          spill.position.set(-317.5, 16, 0);
+          spill.rotation.y = Math.PI / 2;
+          scenarioPropsGroup.add(spill);
+        } else if (scenario === 'urban') {
+          // Transformadores na Subestação Elétrica (x=120, y=-280 -> z=+280)
+          var txMat = new THREE.MeshStandardMaterial({ color: 0x3f4c56, metalness: 0.6 });
+          for (var t = -1; t <= 1; t++) {
+            var unit = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 6), txMat);
+            unit.position.set(120 + t * 14, 2.5, 280);
+            unit.castShadow = true;
+            scenarioPropsGroup.add(unit);
+          }
+          // Postes ao longo das avenidas principais
+          var poleMat = new THREE.MeshStandardMaterial({ color: 0x2f3640, metalness: 0.7 });
+          var lampMat = new THREE.MeshBasicMaterial({ color: 0xffeaa7 });
+          for (var p = -360; p <= 360; p += 90) {
+            if (Math.abs(p) < 30) continue;
+            var pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 7.5, 6), poleMat);
+            pole.position.set(14, 3.75, p);
+            scenarioPropsGroup.add(pole);
+            var bulb = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6), lampMat);
+            bulb.position.set(14, 7.6, p);
+            scenarioPropsGroup.add(bulb);
+          }
+        }
+      }
+
       /// Recebe a planta de obstáculos gerada pelo Dart (WorldGenerator).
       window.loadWorldObstacles = function (payload) {
         var data = payload;
@@ -482,7 +836,7 @@
         }
         if (!data || !data.obstacles) return;
 
-        clearObstacles();
+        clearGroup(obstaclesGroup);
         data.obstacles.forEach(function (o) {
           switch (o.type) {
             case 'building':
@@ -500,7 +854,7 @@
             case 'dam':
             case 'pillar':
             case 'hangar':
-              addBox(o, concreteMat);
+              addBox(o, o.type === 'hangar' && currentScenario === 'forest' ? woodMat : concreteMat);
               break;
             default:
               addBox(o, concreteMat);
@@ -509,7 +863,7 @@
         });
       };
 
-      /// Recarrega o cenário completo (tema do terreno/céu/água + obstáculos).
+      // ── Banner de Mapa ──
       var mapBannerEl = document.createElement('div');
       mapBannerEl.className = 'map-banner';
       document.body.appendChild(mapBannerEl);
@@ -525,23 +879,10 @@
         }, 2600);
       };
 
-      window.loadMapScenario = function (payload) {
-        var data = payload;
-        if (typeof data === 'string') {
-          try {
-            data = JSON.parse(data);
-          } catch (e) {
-            console.error('Falha ao interpretar o cenário:', e);
-            return;
-          }
-        }
-        if (!data) return;
-        applyScenarioTheme(data.theme);
-        window.loadWorldObstacles(data);
-        if (data.label) window.showMapBanner(data.label);
-      };
-
       // ── Barreira Geofence e Zonas No-Fly ──
+      var nfzGroup = new THREE.Group();
+      scene.add(nfzGroup);
+
       function buildGeofenceAndNoFlyZones() {
         var safetyGroup = new THREE.Group();
 
@@ -575,6 +916,8 @@
         ringTop.position.y = fenceHeight;
         safetyGroup.add(ringTop);
 
+        scene.add(safetyGroup);
+
         var nfzX = 120.0;
         var nfzZ = 280.0;
         var nfzR = 75.0;
@@ -584,88 +927,89 @@
         var nfzMat = new THREE.MeshBasicMaterial({
           color: 0xff1100,
           transparent: true,
-          opacity: 0.26,
+          opacity: 0.24,
           side: THREE.DoubleSide,
           depthWrite: false
         });
         var nfzCylinder = new THREE.Mesh(nfzGeo, nfzMat);
         nfzCylinder.position.set(nfzX, nfzH / 2, nfzZ);
-        safetyGroup.add(nfzCylinder);
+        nfzGroup.add(nfzCylinder);
 
         var nfzRingGeo = new THREE.RingGeometry(nfzR - 2.5, nfzR + 2.5, 36);
         nfzRingGeo.rotateX(-Math.PI / 2);
         var nfzRing = new THREE.Mesh(nfzRingGeo, new THREE.MeshBasicMaterial({ color: 0xff1100, side: THREE.DoubleSide }));
         nfzRing.position.set(nfzX, 0.18, nfzZ);
-        safetyGroup.add(nfzRing);
-
-        scene.add(safetyGroup);
+        nfzGroup.add(nfzRing);
       }
       buildGeofenceAndNoFlyZones();
 
-      // ── Modelo 3D do Drone ──
+      window.loadMapScenario = function (payload) {
+        var data = payload;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            console.error('Falha ao interpretar o cenário:', e);
+            return;
+          }
+        }
+        if (!data) return;
+        var scenario = data.scenario || 'urban';
+        nfzGroup.visible = data.hasNoFlyZone !== false;
+        applyScenarioTheme(data.theme, scenario);
+        populateScenarioProps(scenario);
+        window.loadWorldObstacles(data);
+        if (data.label) window.showMapBanner(data.label);
+      };
+
+      // ── Modelo 3D do Drone + Drone Ghost ──
       var droneGroup = new THREE.Group();
       droneGroup.rotation.order = 'YXZ';
       var dronePropellers = [];
 
-      function buildDroneModel() {
-        var bodyMat = new THREE.MeshStandardMaterial({
-          color: 0x24282c,
-          roughness: 0.4,
-          metalness: 0.35
-        });
-        var accentMat = new THREE.MeshStandardMaterial({
-          color: 0x00d4ff,
-          roughness: 0.3,
-          metalness: 0.6
-        });
-        var armMat = new THREE.MeshStandardMaterial({
-          color: 0x181a1c,
-          roughness: 0.6,
-          metalness: 0.5
-        });
-        var motorMat = new THREE.MeshStandardMaterial({
-          color: 0x8a929a,
-          roughness: 0.25,
-          metalness: 0.85
-        });
-        var propMat = new THREE.MeshStandardMaterial({
-          color: 0x151515,
-          roughness: 0.3,
-          metalness: 0.2,
-          transparent: true,
-          opacity: 0.85
-        });
+      function buildDroneMesh(targetGroup, propsOut, isGhost) {
+        var opacityVal = isGhost ? 0.42 : 1.0;
+        var bodyMat = isGhost
+          ? new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: opacityVal })
+          : new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.4, metalness: 0.35 });
+        var accentMat = isGhost
+          ? bodyMat
+          : new THREE.MeshStandardMaterial({ color: 0x00d4ff, roughness: 0.3, metalness: 0.6 });
+        var armMat = isGhost
+          ? bodyMat
+          : new THREE.MeshStandardMaterial({ color: 0x181a1c, roughness: 0.6, metalness: 0.5 });
+        var motorMat = isGhost
+          ? bodyMat
+          : new THREE.MeshStandardMaterial({ color: 0x8a929a, roughness: 0.25, metalness: 0.85 });
+        var propMat = isGhost
+          ? new THREE.MeshBasicMaterial({ color: 0x80f8ff, transparent: true, opacity: 0.35 })
+          : new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.85 });
 
-        // 1. Corpo Central Aerodinâmico
-        var bodyTopGeo = new THREE.BoxGeometry(0.22, 0.08, 0.36);
-        var bodyTop = new THREE.Mesh(bodyTopGeo, bodyMat);
+        var bodyTop = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.36), bodyMat);
         bodyTop.position.y = 0.04;
-        bodyTop.castShadow = true;
-        droneGroup.add(bodyTop);
+        targetGroup.add(bodyTop);
 
-        var stripeGeo = new THREE.BoxGeometry(0.06, 0.02, 0.32);
-        var stripe = new THREE.Mesh(stripeGeo, accentMat);
+        var stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.32), accentMat);
         stripe.position.set(0, 0.085, 0);
-        stripe.castShadow = true;
-        droneGroup.add(stripe);
+        targetGroup.add(stripe);
 
-        var gimbalBase = new THREE.Mesh(
-          new THREE.SphereGeometry(0.045, 12, 12),
-          new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9 })
-        );
-        gimbalBase.position.set(0, -0.01, -0.19);
-        gimbalBase.castShadow = true;
-        droneGroup.add(gimbalBase);
+        if (!isGhost) {
+          var gimbalBase = new THREE.Mesh(
+            new THREE.SphereGeometry(0.045, 12, 12),
+            new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9 })
+          );
+          gimbalBase.position.set(0, -0.01, -0.19);
+          targetGroup.add(gimbalBase);
 
-        var lensMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.02, 0.02, 0.025, 12),
-          new THREE.MeshBasicMaterial({ color: 0x00ffcc })
-        );
-        lensMesh.rotation.x = Math.PI / 2;
-        lensMesh.position.set(0, -0.01, -0.22);
-        droneGroup.add(lensMesh);
+          var lensMesh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.02, 0.025, 12),
+            new THREE.MeshBasicMaterial({ color: 0x00ffcc })
+          );
+          lensMesh.rotation.x = Math.PI / 2;
+          lensMesh.position.set(0, -0.01, -0.22);
+          targetGroup.add(lensMesh);
+        }
 
-        // 2. Braços em 'X' e Motores
         var motorOffsets = [
           { x: 0.22, z: -0.20, isFront: true, isRight: true, spinDir: 1 },
           { x: -0.22, z: -0.20, isFront: true, isRight: false, spinDir: -1 },
@@ -675,85 +1019,73 @@
 
         motorOffsets.forEach(function (m) {
           var armLen = Math.hypot(m.x, m.z);
-          var armGeo = new THREE.BoxGeometry(0.035, 0.025, armLen);
-          var armMesh = new THREE.Mesh(armGeo, armMat);
-          var armAngle = Math.atan2(m.x, m.z);
-          armMesh.rotation.y = armAngle;
+          var armMesh = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.025, armLen), armMat);
+          armMesh.rotation.y = Math.atan2(m.x, m.z);
           armMesh.position.set(m.x / 2, 0.03, m.z / 2);
-          armMesh.castShadow = true;
-          droneGroup.add(armMesh);
+          targetGroup.add(armMesh);
 
-          var motorGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14);
-          var motorMesh = new THREE.Mesh(motorGeo, motorMat);
+          var motorMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.045, 14), motorMat);
           motorMesh.position.set(m.x, 0.045, m.z);
-          motorMesh.castShadow = true;
-          droneGroup.add(motorMesh);
+          targetGroup.add(motorMesh);
 
           var propHub = new THREE.Group();
           propHub.position.set(m.x, 0.072, m.z);
+          propHub.add(new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.004, 0.26), propMat));
+          propHub.add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.015, 8), motorMat));
+          targetGroup.add(propHub);
+          propsOut.push({ hub: propHub, dir: m.spinDir });
 
-          var bladeGeo = new THREE.BoxGeometry(0.022, 0.004, 0.26);
-          var bladeMesh = new THREE.Mesh(bladeGeo, propMat);
-          bladeMesh.castShadow = true;
-          propHub.add(bladeMesh);
-
-          var nutGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.015, 8);
-          var nutMesh = new THREE.Mesh(nutGeo, motorMat);
-          nutMesh.position.y = 0.008;
-          propHub.add(nutMesh);
-
-          droneGroup.add(propHub);
-          dronePropellers.push({
-            hub: propHub,
-            dir: m.spinDir
-          });
-
-          var ledColor = m.isFront ? 0xffffff : (m.isRight ? 0x00ff44 : 0xff2222);
-          var ledGeo = new THREE.SphereGeometry(0.018, 8, 8);
-          var ledMat = new THREE.MeshBasicMaterial({ color: ledColor });
-          var ledMesh = new THREE.Mesh(ledGeo, ledMat);
-          ledMesh.position.set(m.x * 0.9, 0.015, m.z * 0.9);
-          droneGroup.add(ledMesh);
-        });
-
-        // 3. Trem de Pouso
-        var skidMat = new THREE.MeshStandardMaterial({ color: 0x141618, roughness: 0.8 });
-        var skidGeo = new THREE.BoxGeometry(0.018, 0.012, 0.32);
-        var strutGeo = new THREE.BoxGeometry(0.014, 0.075, 0.014);
-
-        [-0.09, 0.09].forEach(function (sx) {
-          var skid = new THREE.Mesh(skidGeo, skidMat);
-          skid.position.set(sx, -0.05, 0);
-          skid.castShadow = true;
-          droneGroup.add(skid);
-
-          [-0.10, 0.10].forEach(function (sz) {
-            var strut = new THREE.Mesh(strutGeo, skidMat);
-            strut.position.set(sx, -0.015, sz);
-            strut.castShadow = true;
-            droneGroup.add(strut);
-          });
-        });
-
-        droneGroup.traverse(function (child) {
-          if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
+          if (!isGhost) {
+            var ledColor = m.isFront ? 0xffffff : (m.isRight ? 0x00ff44 : 0xff2222);
+            var ledMesh = new THREE.Mesh(
+              new THREE.SphereGeometry(0.018, 8, 8),
+              new THREE.MeshBasicMaterial({ color: ledColor })
+            );
+            ledMesh.position.set(m.x * 0.9, 0.015, m.z * 0.9);
+            targetGroup.add(ledMesh);
           }
         });
 
-        droneGroup.position.set(0, 0.11, 0);
-        // Inicialmente em modo FPV, droneGroup fica oculto
-        droneGroup.visible = false;
-        scene.add(droneGroup);
+        if (!isGhost) {
+          var skidMat = new THREE.MeshStandardMaterial({ color: 0x141618, roughness: 0.8 });
+          var skidGeo = new THREE.BoxGeometry(0.018, 0.012, 0.32);
+          var strutGeo = new THREE.BoxGeometry(0.014, 0.075, 0.014);
+          [-0.09, 0.09].forEach(function (sx) {
+            var skid = new THREE.Mesh(skidGeo, skidMat);
+            skid.position.set(sx, -0.05, 0);
+            targetGroup.add(skid);
+            [-0.10, 0.10].forEach(function (sz) {
+              var strut = new THREE.Mesh(strutGeo, skidMat);
+              strut.position.set(sx, -0.015, sz);
+              targetGroup.add(strut);
+            });
+          });
+          targetGroup.traverse(function (child) {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+        }
       }
-      buildDroneModel();
+
+      buildDroneMesh(droneGroup, dronePropellers, false);
+      droneGroup.position.set(0, 0.11, 0);
+      droneGroup.visible = false;
+      scene.add(droneGroup);
 
       // LED traseiro que pisca em vermelho durante o crash.
       var crashLedMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
       var crashLed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), crashLedMat);
       crashLed.position.set(0, 0.10, 0.18);
       droneGroup.add(crashLed);
+
+      // Modelo Ghost translúcido para correr contra o próprio recorde.
+      var ghostGroup = new THREE.Group();
+      var ghostPropellers = [];
+      buildDroneMesh(ghostGroup, ghostPropellers, true);
+      ghostGroup.visible = false;
+      scene.add(ghostGroup);
 
       // ── Sistema de partículas de impacto (faíscas + fumaça) ──
       var crashParticles = [];
@@ -844,13 +1176,16 @@
         }
       }
 
-      // ── Câmera Dinâmica (FPV vs 3ª Pessoa / Chase Cam) ──
-      // ── Estado da câmera: transição FPV ↔ 3ª pessoa ──
+      // ── Câmera Dinâmica (FPV vs 3ª Pessoa / Chase Cam + Acro Quaternion) ──
       var cameraTransition = 0.0;          // 0 = FPV, 1 = 3ª pessoa
       var cameraTransitionSpeed = 1.0 / 0.45; // leva ~0.45s
       var chaseSpringPos = new THREE.Vector3(0, 2.2, 5.5);
       var chaseSpringLook = new THREE.Vector3(0, 0.5, 0);
       var chaseInitialized = false;
+      var bodyThreeQuat = new THREE.Quaternion();
+      var uptiltThreeQuat = new THREE.Quaternion();
+      var fpvFullQuat = new THREE.Quaternion();
+      var chaseTempCam = new THREE.PerspectiveCamera();
 
       // ── API Exposta para o Flutter ──
       window.updateDroneState = function (jsonState) {
@@ -875,6 +1210,10 @@
         if (typeof data.visualRoll === 'number') droneState.visualRoll = data.visualRoll;
         if (typeof data.gimbalPitch === 'number') droneState.gimbalPitch = data.gimbalPitch;
         if (typeof data.cameraMode === 'string') droneState.cameraMode = data.cameraMode;
+        if (typeof data.flightMode === 'string') droneState.flightMode = data.flightMode;
+        if (typeof data.fpvUptiltDeg === 'number') droneState.fpvUptiltDeg = data.fpvUptiltDeg;
+        if (typeof data.audioEnabled === 'boolean') droneState.audioEnabled = data.audioEnabled;
+        if (typeof data.speedKmh === 'number') droneState.speedKmh = data.speedKmh;
         if (typeof data.flying === 'boolean') droneState.flying = data.flying;
         if (typeof data.battery === 'number') droneState.battery = data.battery;
         if (typeof data.isArmed === 'boolean') droneState.isArmed = data.isArmed;
@@ -883,6 +1222,11 @@
         if (typeof data.pitchRad === 'number') droneState.pitchRad = data.pitchRad;
         if (typeof data.rollRad === 'number') droneState.rollRad = data.rollRad;
         if (typeof data.yawRad === 'number') droneState.yawRad = data.yawRad;
+        if (typeof data.qx === 'number') droneState.qx = data.qx;
+        if (typeof data.qy === 'number') droneState.qy = data.qy;
+        if (typeof data.qz === 'number') droneState.qz = data.qz;
+        if (typeof data.qw === 'number') droneState.qw = data.qw;
+        if (data.ghost && typeof data.ghost === 'object') droneState.ghost = data.ghost;
         if (typeof data.crashImpactSpeedKmh === 'number') {
           droneState.crashImpactSpeedKmh = data.crashImpactSpeedKmh;
         }
@@ -895,6 +1239,13 @@
         }
 
         updateDroneTransform();
+        updateGhostTransform();
+        AudioEngine.updateMotors(
+          droneState.motors,
+          droneState.isArmed,
+          droneState.isCrashed,
+          droneState.audioEnabled
+        );
 
         if (!wasCrashed && droneState.isCrashed) {
           spawnCrashEffect(droneGroup.position, droneState.crashImpactSpeedKmh);
@@ -908,6 +1259,14 @@
 
         droneGroup.position.set(droneX, droneY + 0.11, droneZ);
 
+        var hasQuat = droneState.isArmed &&
+          (droneState.qx !== 0.0 || droneState.qy !== 0.0 || droneState.qz !== 0.0);
+        if (hasQuat) {
+          bodyThreeQuat.set(droneState.qx, droneState.qz, -droneState.qy, droneState.qw).normalize();
+          droneGroup.quaternion.copy(bodyThreeQuat);
+          return;
+        }
+
         // Orientação física 6-DOF (radianos) tem prioridade sobre os graus antigos.
         var yawRad = Number.isFinite(droneState.yawRad) && droneState.yawRad !== 0.0
           ? droneState.yawRad
@@ -920,6 +1279,22 @@
           : -(droneState.visualRoll * Math.PI / 180.0);
 
         droneGroup.rotation.set(pitchRad, yawRad, rollRad, 'YXZ');
+      }
+
+      function updateGhostTransform() {
+        var g = droneState.ghost;
+        if (!g || !g.active) {
+          ghostGroup.visible = false;
+          return;
+        }
+        ghostGroup.visible = true;
+        ghostGroup.position.set(g.x || 0, (g.z || 0) + 0.11, -(g.y || 0));
+        ghostGroup.rotation.set(
+          g.pitchRad || 0,
+          g.yawRad || 0,
+          -(g.rollRad || 0),
+          'YXZ'
+        );
       }
 
       // ── Atualização da Câmera por Frame ──
@@ -989,13 +1364,44 @@
           fpvPosZ + (chaseSpringPos.z - fpvPosZ) * blend
         );
 
-        var lookX = fpvLookX + (chaseSpringLook.x - fpvLookX) * blend;
-        var lookY = fpvLookY + (chaseSpringLook.y - fpvLookY) * blend;
-        var lookZ = fpvLookZ + (chaseSpringLook.z - fpvLookZ) * blend;
-        camera.lookAt(lookX, lookY, lookZ);
+        // Em modo ACRO FPV, usa quatérnio completo 3D sem gimbal-lock (flips/rolls de 360° livres).
+        var isAcroFpv = droneState.flightMode === 'acro' &&
+          droneState.isArmed &&
+          blend < 0.99;
+        if (isAcroFpv) {
+          bodyThreeQuat.set(droneState.qx, droneState.qz, -droneState.qy, droneState.qw).normalize();
+          var tiltRad = ((droneState.fpvUptiltDeg || 0.0) + (droneState.gimbalPitch || 0.0)) * Math.PI / 180.0;
+          uptiltThreeQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), tiltRad);
+          fpvFullQuat.copy(bodyThreeQuat).multiply(uptiltThreeQuat);
 
-        // Horizonte inclina apenas de leve na 3ª pessoa (roll * 0.25).
-        camera.rotateZ(rollRad * 0.25 * blend);
+          if (blend <= 0.01) {
+            camera.quaternion.copy(fpvFullQuat);
+          } else {
+            chaseTempCam.position.copy(chaseSpringPos);
+            chaseTempCam.lookAt(chaseSpringLook);
+            chaseTempCam.rotateZ(rollRad * 0.25);
+            camera.quaternion.copy(fpvFullQuat).slerp(chaseTempCam.quaternion, blend);
+          }
+        } else {
+          var lookX = fpvLookX + (chaseSpringLook.x - fpvLookX) * blend;
+          var lookY = fpvLookY + (chaseSpringLook.y - fpvLookY) * blend;
+          var lookZ = fpvLookZ + (chaseSpringLook.z - fpvLookZ) * blend;
+          camera.lookAt(lookX, lookY, lookZ);
+
+          // Horizonte inclina apenas de leve na 3ª pessoa (roll * 0.25).
+          camera.rotateZ(rollRad * 0.25 * blend);
+        }
+
+        // Efeito leve de FOV dinâmico com velocidade para sensação de imersão.
+        var targetFov = 62 + Math.min(18, (droneState.speedKmh || 0) * 0.16);
+        if (Math.abs(camera.fov - targetFov) > 0.25) {
+          camera.fov += (targetFov - camera.fov) * Math.min(1.0, dt * 6.0);
+          camera.updateProjectionMatrix();
+        }
+
+        // Farol frontal ligado em modo noturno.
+        droneHeadlight.position.set(droneX, droneY + 0.3, droneZ);
+        droneHeadlight.intensity = currentLightingPreset === 'night' ? 2.4 : 0.0;
 
         // Drone visível durante a transição e no modo perseguição.
         droneGroup.visible = cameraTransition > 0.02;
@@ -1018,7 +1424,7 @@
         }
       }
 
-      // ── Portais da corrida (Corrida de Portais) ──
+      // ── Portais da corrida (Corrida de Portais & Time Attack) ──
       var raceGroup = new THREE.Group();
       scene.add(raceGroup);
       var raceGates = [];
@@ -1053,7 +1459,6 @@
         raceGroup.add(ring);
 
         if (isActive) {
-          // Halo externo translúcido para destacar o portal ativo à distância.
           var haloMat = new THREE.MeshBasicMaterial({
             color: 0x00e5ff,
             transparent: true,
@@ -1067,10 +1472,7 @@
           halo.position.copy(ring.position);
           halo.rotation.copy(ring.rotation);
           raceGroup.add(halo);
-        }
 
-        if (isActive) {
-          // Setas luminosas ao redor do anel ativo.
           for (var i = 0; i < 4; i++) {
             var arrow = new THREE.Mesh(
               new THREE.ConeGeometry(0.35, 0.9, 6),
@@ -1087,6 +1489,31 @@
           }
         }
         return ring;
+      }
+
+      function buildGateTrail(fromGate, toGate) {
+        if (!fromGate || !toGate) return;
+        var p1 = new THREE.Vector3(fromGate.x, fromGate.z, -fromGate.y);
+        var p2 = new THREE.Vector3(toGate.x, toGate.z, -toGate.y);
+        var dir = p2.clone().sub(p1);
+        var dist = dir.length();
+        if (dist < 4.0) return;
+        dir.normalize();
+        var steps = Math.min(8, Math.max(3, Math.floor(dist / 14.0)));
+        var chevGeo = new THREE.ConeGeometry(0.32, 0.9, 5);
+        var chevMat = new THREE.MeshBasicMaterial({
+          color: 0x33ff99,
+          transparent: true,
+          opacity: 0.55
+        });
+        for (var k = 1; k < steps; k++) {
+          var t = k / steps;
+          var pos = p1.clone().lerp(p2, t);
+          var c = new THREE.Mesh(chevGeo, chevMat);
+          c.position.copy(pos);
+          c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+          raceGroup.add(c);
+        }
       }
 
       function updateGuideArrow() {
@@ -1131,7 +1558,7 @@
         }
         if (!data) return;
 
-        raceModeOn = !!data.mode && data.mode !== 'freeFlight';
+        raceModeOn = !!data.mode && data.mode !== 'freeFlight' && data.mode !== 'freestyle';
         raceActiveIndex = Number(data.activeIndex) || 0;
 
         clearRaceGates();
@@ -1145,10 +1572,14 @@
           return;
         }
 
+        var nextIndex = (raceActiveIndex + 1) % raceGates.length;
         for (var j = 0; j < raceGates.length; j++) {
           var isActive = j === raceActiveIndex;
-          var isNext = j === raceActiveIndex + 1;
+          var isNext = j === nextIndex;
           buildRaceGate(raceGates[j], isActive, isNext);
+        }
+        if (raceGates.length > 1) {
+          buildGateTrail(raceGates[raceActiveIndex], raceGates[nextIndex]);
         }
       };
 
@@ -1162,7 +1593,6 @@
         var frameDt = (now - lastFrameTime) / 1000.0;
         lastFrameTime = now;
 
-        // Animação contínua das hélices quando o drone está ativo
         var isSpinning = droneState.flying ||
           droneState.status === 'flying' ||
           droneState.status === 'hovering' ||
@@ -1179,12 +1609,21 @@
           var motorNorm = isSpinning
             ? Math.min(1.0, Math.max(0.0, motors[i % 4] || 0.0))
             : 0.0;
-          // Rotação visual proporcional ao RPM normalizado de cada motor.
           var propSpeed = isSpinning
             ? (6.0 + 46.0 * motorNorm)
             : Math.max(0.0, 0.65 - (droneState.z > 0.05 ? 0.0 : 0.65));
           dronePropellers[i].hub.rotation.y +=
             propSpeed * dronePropellers[i].dir * frameDt;
+        }
+
+        if (ghostGroup.visible) {
+          for (var g = 0; g < ghostPropellers.length; g++) {
+            ghostPropellers[g].hub.rotation.y += 28.0 * ghostPropellers[g].dir * frameDt;
+          }
+        }
+
+        if (waterMesh.visible) {
+          waterMesh.position.y = 0.09 + Math.sin(now * 0.0018) * 0.03;
         }
 
         updateCrashParticles(frameDt);
@@ -1194,7 +1633,6 @@
           raceGroup.children[0].scale.setScalar(pulse);
         }
 
-        // LED de crash pisca rápido em vermelho
         crashLed.visible = !droneState.isCrashed ||
           (Math.floor(performance.now() / 90) % 2 === 0);
 
@@ -1212,7 +1650,7 @@
         renderer.setSize(w, h);
       });
 
-      console.log('Câmera dinâmica FPV e 3ª Pessoa configurada com sucesso.');
+      console.log('Câmera dinâmica FPV, Acro 3D, Áudio e Ghost configurados com sucesso.');
     })();
   </script>
 </body>

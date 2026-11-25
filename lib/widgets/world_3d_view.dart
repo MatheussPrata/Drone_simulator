@@ -30,7 +30,9 @@ class _World3dViewState extends State<World3dView> {
   String? _loadedScenarioId;
   String? _lastRaceMapId;
   int _lastRaceGateIndex = -1;
+  String? _lastRaceMode;
   bool _racePushed = false;
+  TimeOfDayPreset? _lastLightingPreset;
 
   @override
   void initState() {
@@ -64,6 +66,7 @@ class _World3dViewState extends State<World3dView> {
                 _isPageLoaded = true;
               });
               _pushObstacleLayout();
+              _pushLightingPreset();
               _syncStateTo3d();
             }
           },
@@ -90,16 +93,44 @@ class _World3dViewState extends State<World3dView> {
     _syncStateTo3d();
   }
 
+  /// Envia o preset de iluminação (day, sunset, night) quando mudar.
+  void _pushLightingPreset() {
+    if (_webViewController == null) return;
+    final preset = widget.controller.timeOfDay;
+    if (_lastLightingPreset == preset) return;
+    _lastLightingPreset = preset;
+
+    _webViewController!
+        .runJavaScript("window.setLightingPreset('${preset.name}');")
+        .catchError((Object error) {
+      debugPrint('Erro ao enviar iluminação ao WebView: $error');
+    });
+  }
+
+  /// Drena os eventos sonoros pendentes e dispara no Web Audio API.
+  void _pushSoundEvents() {
+    if (_webViewController == null) return;
+    final events = widget.controller.feedback.drainPendingSounds();
+    for (final ev in events) {
+      final val = ev.value.toStringAsFixed(2);
+      _webViewController!
+          .runJavaScript("window.triggerSoundEffect('${ev.kind.name}', $val);")
+          .catchError((_) {});
+    }
+  }
+
   /// Envia o circuito de portais e o índice ativo para a cena 3D.
   void _pushRaceState() {
     final controller = widget.controller;
     final course = controller.raceCourse;
+    final modeName = controller.simulatorMode.name;
 
     if (!controller.isRaceMode || course == null) {
       if (_racePushed) {
         _racePushed = false;
         _lastRaceMapId = null;
         _lastRaceGateIndex = -1;
+        _lastRaceMode = null;
         _webViewController!
             .runJavaScript("window.updateRaceState('{\"mode\":\"freeFlight\"}');")
             .catchError((Object error) {
@@ -112,17 +143,19 @@ class _World3dViewState extends State<World3dView> {
     final index = controller.raceGateIndex;
     if (_racePushed &&
         _lastRaceMapId == course.mapId &&
-        _lastRaceGateIndex == index) {
+        _lastRaceGateIndex == index &&
+        _lastRaceMode == modeName) {
       return;
     }
 
     _racePushed = true;
     _lastRaceMapId = course.mapId;
     _lastRaceGateIndex = index;
+    _lastRaceMode = modeName;
 
     final courseJson = course.toJsonString();
     final body = '${courseJson.substring(0, courseJson.length - 1)},'
-        '"mode":"gateRace","activeIndex":$index}';
+        '"mode":"$modeName","activeIndex":$index}';
 
     _webViewController!
         .runJavaScript("window.updateRaceState('$body');")
@@ -149,7 +182,8 @@ class _World3dViewState extends State<World3dView> {
 
   String _buildStatePayload() {
     final s = widget.controller;
-    final cameraModeStr = s.cameraMode == CameraViewMode.thirdPerson ? 'thirdPerson' : 'fpv';
+    final cameraModeStr =
+        s.cameraMode == CameraViewMode.thirdPerson ? 'thirdPerson' : 'fpv';
     final isFlying = s.status == SimulatorStatus.flying ||
         s.status == SimulatorStatus.takingOff ||
         s.status == SimulatorStatus.rth ||
@@ -159,12 +193,31 @@ class _World3dViewState extends State<World3dView> {
         .map((m) => m.clamp(0.0, 1.0).toStringAsFixed(3))
         .join(',');
 
+    final q = s.orientationQuat;
+    final ghost = s.currentGhostFrame;
+    final ghostJson = ghost == null
+        ? '{"active":false}'
+        : '{"active":true,"x":${ghost.x.toStringAsFixed(2)},'
+            '"y":${ghost.y.toStringAsFixed(2)},'
+            '"z":${ghost.z.toStringAsFixed(2)},'
+            '"pitchRad":${ghost.pitchRad.toStringAsFixed(4)},'
+            '"rollRad":${ghost.rollRad.toStringAsFixed(4)},'
+            '"yawRad":${ghost.yawRad.toStringAsFixed(4)}}';
+
     return '{"x":${s.x.toStringAsFixed(2)},"y":${s.y.toStringAsFixed(2)},"z":${s.z.toStringAsFixed(2)},'
         '"yaw":${s.yaw.toStringAsFixed(2)},"pitch":${s.visualPitch.toStringAsFixed(2)},"roll":${s.visualRoll.toStringAsFixed(2)},'
         '"visualPitch":${s.visualPitch.toStringAsFixed(2)},"visualRoll":${s.visualRoll.toStringAsFixed(2)},'
         '"pitchRad":${s.pitchRad.toStringAsFixed(4)},"rollRad":${s.rollRad.toStringAsFixed(4)},'
-        '"yawRad":${s.yawRad.toStringAsFixed(4)},"motors":[$motors],'
+        '"yawRad":${s.yawRad.toStringAsFixed(4)},'
+        '"qx":${q.x.toStringAsFixed(5)},"qy":${q.y.toStringAsFixed(5)},'
+        '"qz":${q.z.toStringAsFixed(5)},"qw":${q.w.toStringAsFixed(5)},'
+        '"motors":[$motors],'
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
+        '"flightMode":"${s.flightMode.name}",'
+        '"fpvUptiltDeg":${s.fpvUptiltDeg.toStringAsFixed(1)},'
+        '"audioEnabled":${s.audioEnabled},'
+        '"speedKmh":${s.speedKmh.toStringAsFixed(1)},'
+        '"ghost":$ghostJson,'
         '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":${s.isArmed},'
         '"impactShake":${s.impactShake.toStringAsFixed(3)},'
         '"isCrashed":${s.isCrashed},'
@@ -176,7 +229,9 @@ class _World3dViewState extends State<World3dView> {
     if (!_isPageLoaded || _webViewController == null) return;
 
     _pushObstacleLayout();
+    _pushLightingPreset();
     _pushRaceState();
+    _pushSoundEvents();
 
     if (_isSending) return;
     _isSending = true;

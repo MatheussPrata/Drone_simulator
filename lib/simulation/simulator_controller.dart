@@ -2,17 +2,24 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:drone_simulator/simulation/flight_physics.dart';
-import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
+import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/models/race_course.dart';
+import 'package:drone_simulator/services/feedback_service.dart';
+import 'package:drone_simulator/services/records_repository.dart';
+import 'package:drone_simulator/simulation/flight_physics.dart';
+import 'package:drone_simulator/simulation/freestyle_manager.dart';
+import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
 import 'package:drone_simulator/simulation/race_manager.dart';
 
 export 'package:drone_simulator/models/drone_state.dart' show CameraViewMode;
 export 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart'
-    show FlightControlMode, Vec3, PhysicsSnapshot, PilotStickInput;
+    show AcroRatePreset, AcroSettings, FlightControlMode, Quat, Vec3, PhysicsSnapshot, PilotStickInput;
 
 /// Modo de jogo do simulador.
-enum SimulatorMode { freeFlight, gateRace }
+enum SimulatorMode { freeFlight, gateRace, timeAttack, freestyle }
+
+/// Preset de horário do dia / iluminação da cena 3D.
+enum TimeOfDayPreset { day, sunset, night }
 
 /// Status operacional do simulador de voo.
 enum SimulatorStatus {
@@ -54,6 +61,8 @@ class SimulatorController extends ChangeNotifier {
 
   final FlightPhysics physics;
   final QuadrotorPhysicsEngine sixDof;
+  final RecordsRepository records;
+  final FeedbackService feedback;
 
   Timer? _timer;
 
@@ -70,7 +79,16 @@ class SimulatorController extends ChangeNotifier {
   bool _isSatellite = true;
   FlightControlMode _flightMode = FlightControlMode.stabilized;
   SimulatorMode _simulatorMode = SimulatorMode.freeFlight;
+  TimeOfDayPreset _timeOfDay = TimeOfDayPreset.day;
+  double _windMultiplier = 1.0;
+  bool _ghostEnabled = true;
+  bool _lastRunWasNewRecord = false;
+
   RaceManager? _raceManager;
+  FreestyleManager? _freestyleManager;
+
+  final List<GhostFrame> _recordedGhostFrames = [];
+  double _ghostSampleAccum = 0.0;
 
   double _manualThrottle = 0.0;
   double _manualYaw = 0.0;
@@ -79,19 +97,42 @@ class SimulatorController extends ChangeNotifier {
 
   double _impactShake = 0.0;
   double _windSpeedMps = 0.0;
+  double _windDirectionDeg = 116.5;
   double _crashImpactSpeedKmh = 0.0;
   double _crashTimer = 0.0;
   DateTime? _lastCrashTimestamp;
   double _benchPitchDeg = 0.0;
   double _benchRollDeg = 0.0;
   PhysicsSnapshot? _lastSnapshot;
+  bool _inNoFlyZone = false;
+  String? _currentNfzName;
+  bool _isGeofenceWarning = false;
+  bool _isGeofenceBreach = false;
+  bool _disposed = false;
+
+  void _safeNotify() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
 
   SimulatorController({
     FlightPhysics? physics,
     QuadrotorPhysicsEngine? sixDof,
+    RecordsRepository? records,
+    FeedbackService? feedback,
   })  : physics = physics ?? FlightPhysics(),
-        sixDof = sixDof ?? QuadrotorPhysicsEngine() {
-    _applyMapWind(physics?.activeMap ?? this.physics.activeMap);
+        sixDof = sixDof ?? QuadrotorPhysicsEngine(),
+        records = records ?? RecordsRepository(),
+        feedback = feedback ?? FeedbackService() {
+    _applyMapWind(this.physics.activeMap);
+    this.sixDof.updateParams(
+        QuadrotorPhysicsEngine.paramsForProfile(this.physics.state.activeProfile));
+    this.records.loadAll().then((_) {
+      if (_disposed) return;
+      _syncSavedBestTimeToRaceManager();
+      _safeNotify();
+    });
   }
 
   // ── Getters de estado ──
@@ -117,6 +158,7 @@ class SimulatorController extends ChangeNotifier {
   bool get isMapPrimaryView => _isMapPrimaryView;
   bool get isSatellite => _isSatellite;
   FlightMap get activeMap => physics.activeMap;
+  DroneProfile get activeProfile => physics.state.activeProfile;
   bool get isArmed => _isArmed;
   bool get isLanded => _status == SimulatorStatus.landed;
   bool get isHovering => _status == SimulatorStatus.hovering;
@@ -134,19 +176,68 @@ class SimulatorController extends ChangeNotifier {
   DateTime? get lastCrashTimestamp => _lastCrashTimestamp;
 
   SimulatorMode get simulatorMode => _simulatorMode;
-  bool get isRaceMode => _simulatorMode == SimulatorMode.gateRace;
+  bool get isRaceMode =>
+      _simulatorMode == SimulatorMode.gateRace ||
+      _simulatorMode == SimulatorMode.timeAttack;
+  bool get isGateRace => _simulatorMode == SimulatorMode.gateRace;
+  bool get isTimeAttack => _simulatorMode == SimulatorMode.timeAttack;
+  bool get isFreestyle => _simulatorMode == SimulatorMode.freestyle;
+
   RaceManager? get raceManager => _raceManager;
   RaceCourse? get raceCourse => _raceManager?.course;
+  FreestyleManager? get freestyleManager => _freestyleManager;
 
   RaceStatus? get raceStatus => _raceManager?.status;
   double get raceElapsedSeconds => _raceManager?.elapsedSeconds ?? 0.0;
-  double get raceScore => _raceManager?.score ?? 0.0;
+  double get raceRemainingSeconds => _raceManager?.remainingSeconds ?? 0.0;
+  int get raceGatesCleared => _raceManager?.gatesCleared ?? 0;
+  double get raceScore =>
+      isFreestyle ? (_freestyleManager?.score ?? 0.0) : (_raceManager?.score ?? 0.0);
   int get raceGateIndex => _raceManager?.currentGateIndex ?? 0;
   int get raceTotalGates => _raceManager?.totalGates ?? 0;
-  int get raceCombo => _raceManager?.combo ?? 1;
-  double? get raceBestTime => _raceManager?.bestTime;
+  int get raceCombo =>
+      isFreestyle ? (_freestyleManager?.combo ?? 1) : (_raceManager?.combo ?? 1);
+  double? get raceBestTime =>
+      _raceManager?.bestTime ?? records.recordFor(activeMap.id).bestRaceTimeSec;
   double get raceDistanceToGate =>
       _raceManager?.distanceToNextGate(_x, _y, _z) ?? 0.0;
+
+  TimeOfDayPreset get timeOfDay => _timeOfDay;
+  double get windMultiplier => _windMultiplier;
+  double get windDirectionDeg => _windDirectionDeg;
+  bool get ghostEnabled => _ghostEnabled;
+  bool get lastRunWasNewRecord => _lastRunWasNewRecord;
+  bool get audioEnabled => feedback.audioEnabled;
+  bool get hapticsEnabled => feedback.hapticsEnabled;
+  MapRecord get currentMapRecord => records.recordFor(activeMap.id);
+
+  AcroSettings get acroSettings => sixDof.acroSettings;
+  double get fpvUptiltDeg => sixDof.acroSettings.fpvUptiltDeg;
+
+  bool get inNoFlyZone => _inNoFlyZone;
+  String? get currentNfzName => _currentNfzName;
+  bool get isGeofenceWarning => _isGeofenceWarning;
+  bool get isGeofenceBreach => _isGeofenceBreach;
+
+  /// Posição do Ghost no instante atual da corrida (quando disponível).
+  GhostFrame? get currentGhostFrame {
+    if (!_ghostEnabled || _simulatorMode != SimulatorMode.gateRace) return null;
+    final race = _raceManager;
+    if (race == null || race.status != RaceStatus.racing) return null;
+    final trajectory = records.recordFor(activeMap.id).ghostTrajectory;
+    if (trajectory.isEmpty) return null;
+    return trajectory.sampleAt(race.elapsedSeconds);
+  }
+
+  /// Diferença (segundos) em relação ao recorde ao concluir a corrida.
+  double? get ghostDeltaSeconds {
+    if (_simulatorMode != SimulatorMode.gateRace || _raceManager == null) {
+      return null;
+    }
+    final best = raceBestTime;
+    if (best == null || _raceManager!.status != RaceStatus.finished) return null;
+    return _raceManager!.elapsedSeconds - best;
+  }
 
   FlightControlMode get flightMode => _flightMode;
   String get flightModeLabel {
@@ -160,7 +251,8 @@ class SimulatorController extends ChangeNotifier {
     }
   }
 
-  /// Inclinação real (radianos) vinda do motor 6-DOF.
+  /// Inclinação real (radianos) e quatérnio vindos do motor 6-DOF.
+  Quat get orientationQuat => _lastSnapshot?.orientation ?? Quat.identity;
   double get pitchRad => _lastSnapshot?.pitchRad ?? 0.0;
   double get rollRad => _lastSnapshot?.rollRad ?? 0.0;
   double get yawRad => _lastSnapshot?.yawRad ?? 0.0;
@@ -192,44 +284,191 @@ class SimulatorController extends ChangeNotifier {
       pitchRad: pitchRad,
       yawRad: yawRad,
       windSpeedMps: _windSpeedMps,
+      windSpeedKmh: _windSpeedMps * 3.6,
+      windDirectionDeg: _windDirectionDeg,
       inVortexRingState: inVortexRingState,
       crashImpactSpeedKmh: _crashImpactSpeedKmh,
       lastCrashTimestamp: _lastCrashTimestamp,
+      inNoFlyZone: _inNoFlyZone,
+      isNoFlyWarning: _inNoFlyZone,
+      currentNfzName: _currentNfzName,
+      isGeofenceWarning: _isGeofenceWarning,
+      isGeofenceBreach: _isGeofenceBreach,
     );
+  }
+
+  /// Configura todos os parâmetros de partida a partir da Página Inicial.
+  void configureSession({
+    required SimulatorMode mode,
+    required FlightMap map,
+    required DroneProfile profile,
+    required FlightControlMode flightMode,
+    required TimeOfDayPreset timeOfDay,
+  }) {
+    physics.selectMap(map);
+    physics.selectProfile(profile);
+    sixDof.updateParams(QuadrotorPhysicsEngine.paramsForProfile(profile));
+    _timeOfDay = timeOfDay;
+    _flightMode = flightMode;
+    if (flightMode == FlightControlMode.acro &&
+        mode == SimulatorMode.freestyle) {
+      sixDof.acroSettings =
+          AcroSettings.forPreset(AcroRatePreset.freestyle);
+    }
+    _applyMapWind(map);
+    setSimulatorMode(mode);
   }
 
   /// Alterna entre Voo Livre e Modo Jogo (corrida de portais).
   void toggleSimulatorMode() {
     if (_simulatorMode == SimulatorMode.freeFlight) {
-      _simulatorMode = SimulatorMode.gateRace;
-      _raceManager = RaceManager(course: RaceCourse.forMap(activeMap))..start();
-      resetRace();
+      setSimulatorMode(SimulatorMode.gateRace);
     } else {
-      _simulatorMode = SimulatorMode.freeFlight;
-      _raceManager = null;
+      setSimulatorMode(SimulatorMode.freeFlight);
     }
-    notifyListeners();
   }
 
-  /// Respawn imediato após queda (voo livre).
+  /// Define explicitamente qualquer um dos 4 modos de jogo.
+  void setSimulatorMode(SimulatorMode mode) {
+    _simulatorMode = mode;
+    _lastRunWasNewRecord = false;
+    _recordedGhostFrames.clear();
+    _ghostSampleAccum = 0.0;
+
+    switch (mode) {
+      case SimulatorMode.freeFlight:
+        _raceManager = null;
+        _freestyleManager = null;
+        break;
+      case SimulatorMode.gateRace:
+        _freestyleManager = null;
+        _raceManager = _createRaceManager(activeMap, timeAttack: false)..start();
+        _syncSavedBestTimeToRaceManager();
+        break;
+      case SimulatorMode.timeAttack:
+        _freestyleManager = null;
+        _raceManager = _createRaceManager(activeMap, timeAttack: true)..start();
+        break;
+      case SimulatorMode.freestyle:
+        _raceManager = null;
+        _freestyleManager = _createFreestyleManager()..start();
+        break;
+    }
+    reset(preserveFlightMode: true);
+  }
+
+  RaceManager _createRaceManager(FlightMap map, {required bool timeAttack}) {
+    return RaceManager(
+      course: RaceCourse.forMap(map),
+      timeAttackMode: timeAttack,
+      onGatePassed: (combo, _) => feedback.triggerGatePassed(combo),
+      onFinished: _handleRaceFinished,
+    );
+  }
+
+  FreestyleManager _createFreestyleManager() {
+    return FreestyleManager(
+      onTrick: (_, points, __) => feedback.triggerTrick(points),
+      onFinished: _handleFreestyleFinished,
+    );
+  }
+
+  void _syncSavedBestTimeToRaceManager() {
+    final race = _raceManager;
+    if (race == null || race.timeAttackMode) return;
+    final saved = records.recordFor(activeMap.id).bestRaceTimeSec;
+    if (saved != null) {
+      final current = race.bestTimes[activeMap.id];
+      if (current == null || saved < current) {
+        race.bestTimes[activeMap.id] = saved;
+      }
+    }
+  }
+
+  void _handleRaceFinished(RaceManager manager) {
+    feedback.triggerFinish();
+    if (manager.timeAttackMode) {
+      records
+          .saveTimeAttackResult(
+        mapId: manager.course.mapId,
+        gatesCleared: manager.gatesCleared,
+        score: manager.score,
+        bestCombo: manager.bestCombo,
+      )
+          .then((res) {
+        if (_disposed) return;
+        _lastRunWasNewRecord = res.isNewRecord;
+        _safeNotify();
+      });
+    } else {
+      final framesCopy = List<GhostFrame>.from(_recordedGhostFrames);
+      records
+          .saveRaceResult(
+        mapId: manager.course.mapId,
+        profileId: activeProfile.type.name,
+        elapsedSeconds: manager.elapsedSeconds,
+        score: manager.score,
+        bestCombo: manager.bestCombo,
+        ghostFrames: framesCopy,
+      )
+          .then((res) {
+        if (_disposed) return;
+        _lastRunWasNewRecord = res.isNewRecord;
+        if (res.record.bestRaceTimeSec != null) {
+          manager.bestTimes[manager.course.mapId] =
+              res.record.bestRaceTimeSec!;
+        }
+        _safeNotify();
+      });
+    }
+  }
+
+  void _handleFreestyleFinished(FreestyleManager manager) {
+    feedback.triggerFinish();
+    records
+        .saveFreestyleResult(
+      mapId: activeMap.id,
+      score: manager.score,
+      bestCombo: manager.bestCombo,
+    )
+        .then((res) {
+      if (_disposed) return;
+      _lastRunWasNewRecord = res.isNewRecord;
+      _safeNotify();
+    });
+  }
+
+  /// Respawn imediato após queda.
   void respawn() {
-    reset();
+    if (_simulatorMode == SimulatorMode.freestyle) {
+      _freestyleManager?.start();
+    }
+    reset(preserveFlightMode: true);
     armAndTakeoff();
     notifyListeners();
   }
 
-  /// Reinicia a corrida atual no mesmo circuito.
+  /// Reinicia a corrida ou sessão atual no mesmo circuito.
   void restartRace() {
-    _raceManager ??= RaceManager(course: RaceCourse.forMap(activeMap));
-    _raceManager!.restart();
-    reset();
-    notifyListeners();
+    _lastRunWasNewRecord = false;
+    _recordedGhostFrames.clear();
+    _ghostSampleAccum = 0.0;
+    if (_simulatorMode == SimulatorMode.freestyle) {
+      _freestyleManager ??= _createFreestyleManager();
+      _freestyleManager!.start();
+    } else {
+      _raceManager ??= _createRaceManager(
+        activeMap,
+        timeAttack: _simulatorMode == SimulatorMode.timeAttack,
+      );
+      _raceManager!.restart();
+    }
+    reset(preserveFlightMode: true);
   }
 
   /// Reseta o voo mantendo o circuito atual.
   void resetRace() {
-    reset();
-    notifyListeners();
+    reset(preserveFlightMode: true);
   }
 
   /// Alterna entre NORMAL → SPORT → ACRO.
@@ -294,33 +533,112 @@ class SimulatorController extends ChangeNotifier {
     }
   }
 
+  /// Seleciona o perfil físico do drone (Mini 249g, Pro Cine 900g, FPV Racer).
+  void selectDroneProfile(DroneProfile profile) {
+    physics.selectProfile(profile);
+    sixDof.updateParams(QuadrotorPhysicsEngine.paramsForProfile(profile));
+    notifyListeners();
+  }
+
+  /// Seleciona o horário do dia / iluminação da cena 3D.
+  void setTimeOfDay(TimeOfDayPreset preset) {
+    if (_timeOfDay != preset) {
+      _timeOfDay = preset;
+      notifyListeners();
+    }
+  }
+
+  /// Configura intensidade do vento (0.0 = Calmo, 1.0 = Padrão, 1.8 = Rajadas Fortes).
+  void setWindMultiplier(double multiplier) {
+    _windMultiplier = multiplier.clamp(0.0, 2.5);
+    _applyMapWind(activeMap);
+    notifyListeners();
+  }
+
+  /// Ajusta parâmetros avançados do modo Acro.
+  void setAcroSettings(AcroSettings settings) {
+    sixDof.acroSettings = settings;
+    notifyListeners();
+  }
+
+  /// Aplica um preset rápido de agilidade Acro (Suave, Padrão ou Freestyle).
+  void setAcroPreset(AcroRatePreset preset) {
+    sixDof.acroSettings = AcroSettings.forPreset(
+      preset,
+      fpvUptiltDeg: sixDof.acroSettings.fpvUptiltDeg,
+    );
+    notifyListeners();
+  }
+
+  void setGhostEnabled(bool enabled) {
+    if (_ghostEnabled != enabled) {
+      _ghostEnabled = enabled;
+      notifyListeners();
+    }
+  }
+
+  void setAudioEnabled(bool enabled) {
+    if (feedback.audioEnabled != enabled) {
+      feedback.audioEnabled = enabled;
+      notifyListeners();
+    }
+  }
+
+  void setHapticsEnabled(bool enabled) {
+    if (feedback.hapticsEnabled != enabled) {
+      feedback.hapticsEnabled = enabled;
+      notifyListeners();
+    }
+  }
+
   /// Seleciona um cenário de decolagem, redefine o Home e reseta o voo.
   void selectTakeoffLocation(FlightMap map) {
     physics.selectMap(map);
     _applyMapWind(map);
     reset();
-    if (_simulatorMode == SimulatorMode.gateRace) {
-      _raceManager = RaceManager(course: RaceCourse.forMap(map))..start();
+    if (_simulatorMode == SimulatorMode.gateRace ||
+        _simulatorMode == SimulatorMode.timeAttack) {
+      _raceManager = _createRaceManager(
+        map,
+        timeAttack: _simulatorMode == SimulatorMode.timeAttack,
+      )..start();
+      _syncSavedBestTimeToRaceManager();
+    } else if (_simulatorMode == SimulatorMode.freestyle) {
+      _freestyleManager = _createFreestyleManager()..start();
     }
   }
 
   /// Configura vento e turbulência específicos de cada cenário.
   void _applyMapWind(FlightMap map) {
+    late Vec3 base;
+    late double turb;
     switch (WorldGenerator.scenarioFor(map)) {
       case WorldScenario.urban:
-        sixDof.baseWindWorld = const Vec3(2.0, -1.0, 0.0);
-        sixDof.turbulenceIntensity = 1.1;
+        base = const Vec3(2.0, -1.0, 0.0);
+        turb = 1.1;
         break;
       case WorldScenario.forest:
-        sixDof.baseWindWorld = const Vec3(1.2, 0.6, 0.0);
-        sixDof.turbulenceIntensity = 0.7;
+        base = const Vec3(1.2, 0.6, 0.0);
+        turb = 0.7;
         break;
       case WorldScenario.canyon:
-        sixDof.baseWindWorld = const Vec3(4.2, -1.8, 0.2);
-        sixDof.turbulenceIntensity = 1.5;
+        base = const Vec3(4.2, -1.8, 0.2);
+        turb = 1.5;
         break;
     }
+    sixDof.baseWindWorld =
+        _windMultiplier == 1.0 ? base : base * _windMultiplier;
+    sixDof.turbulenceIntensity =
+        _windMultiplier == 1.0 ? turb : turb * _windMultiplier;
     _windSpeedMps = sixDof.baseWindWorld.length;
+    if (_windSpeedMps > 0.01) {
+      _windDirectionDeg =
+          (atan2(sixDof.baseWindWorld.x, sixDof.baseWindWorld.y) *
+                      180.0 /
+                      pi +
+                  360.0) %
+              360.0;
+    }
   }
 
   void start() {
@@ -337,6 +655,7 @@ class SimulatorController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     stop();
     physics.dispose();
     super.dispose();
@@ -381,7 +700,7 @@ class SimulatorController extends ChangeNotifier {
   }
 
   /// Reseta o simulador, a física 6-DOF e a bateria.
-  void reset() {
+  void reset({bool preserveFlightMode = false}) {
     _status = SimulatorStatus.landed;
     _x = 0.0;
     _y = 0.0;
@@ -397,7 +716,15 @@ class SimulatorController extends ChangeNotifier {
     _cameraMode = CameraViewMode.fpv;
     _isMapPrimaryView = false;
     _impactShake = 0.0;
-    _flightMode = FlightControlMode.stabilized;
+    _inNoFlyZone = false;
+    _currentNfzName = null;
+    _isGeofenceWarning = false;
+    _isGeofenceBreach = false;
+    _recordedGhostFrames.clear();
+    _ghostSampleAccum = 0.0;
+    if (!preserveFlightMode) {
+      _flightMode = FlightControlMode.stabilized;
+    }
     physics.resetBattery();
     physics.selectMap(physics.activeMap);
     sixDof.reset(
@@ -511,7 +838,7 @@ class SimulatorController extends ChangeNotifier {
 
     final input = _buildStickInput();
     final previousVz = _lastSnapshot?.velocity.z ?? 0.0;
-    final snapshot = sixDof.step(
+    var snapshot = sixDof.step(
       input: input,
       dt: dt,
       mode: _flightMode,
@@ -519,7 +846,9 @@ class SimulatorController extends ChangeNotifier {
     );
 
     _applySnapshot(snapshot);
-    _resolveWorldCollisions(snapshot);
+    final minClearance = _resolveWorldCollisions(snapshot);
+    snapshot = _lastSnapshot ?? snapshot;
+    _enforceGeofenceAndNfz(snapshot);
 
     // Impacto violento no solo durante voo armado.
     if (_status != SimulatorStatus.crashed &&
@@ -534,7 +863,24 @@ class SimulatorController extends ChangeNotifier {
     }
 
     final race = _raceManager;
-    if (race != null && _simulatorMode == SimulatorMode.gateRace) {
+    if (race != null && isRaceMode) {
+      if (_simulatorMode == SimulatorMode.gateRace &&
+          race.status == RaceStatus.racing &&
+          _status != SimulatorStatus.crashed) {
+        _ghostSampleAccum += dt;
+        if (_ghostSampleAccum >= 0.10) {
+          _ghostSampleAccum -= 0.10;
+          _recordedGhostFrames.add(GhostFrame(
+            t: race.elapsedSeconds,
+            x: _x,
+            y: _y,
+            z: _z,
+            pitchRad: pitchRad,
+            rollRad: rollRad,
+            yawRad: yawRad,
+          ));
+        }
+      }
       race.update(
         dt: dt,
         x: _x,
@@ -544,8 +890,66 @@ class SimulatorController extends ChangeNotifier {
         crashed: _status == SimulatorStatus.crashed,
       );
     }
+
+    final freestyle = _freestyleManager;
+    if (freestyle != null && _simulatorMode == SimulatorMode.freestyle) {
+      freestyle.update(
+        dt: dt,
+        altitude: _z,
+        speedKmh: _speedKmh,
+        verticalSpeedMs: snapshot.verticalSpeedMps,
+        omegaPitchRadS: snapshot.angularVelocityBody.x,
+        omegaRollRadS: snapshot.angularVelocityBody.y,
+        omegaYawRadS: snapshot.angularVelocityBody.z,
+        minObstacleClearance: minClearance,
+        crashed: _status == SimulatorStatus.crashed,
+      );
+    }
+
     _impactShake = max(0.0, _impactShake - dt * 1.5);
     notifyListeners();
+  }
+
+  void _enforceGeofenceAndNfz(PhysicsSnapshot snapshot) {
+    final validation = GeofenceValidator.validateCartesian(
+      x: _x,
+      y: _y,
+      velocityX: snapshot.velocity.x,
+      velocityY: snapshot.velocity.y,
+      maxRadiusMeters: activeMap.radiusMeters,
+      warningRadiusMeters: activeMap.warningRadiusMeters,
+      noFlyZones: activeMap.noFlyZones,
+      origin: activeMap.center,
+    );
+
+    _inNoFlyZone = validation.inNoFlyZone;
+    _currentNfzName = validation.currentNfzName;
+    _isGeofenceWarning = validation.isGeofenceWarning;
+    _isGeofenceBreach = validation.isGeofenceBreach;
+
+    if (validation.isGeofenceBreach &&
+        _isArmed &&
+        _status != SimulatorStatus.crashed &&
+        _status != SimulatorStatus.landed) {
+      sixDof.applyExternalCollisionCorrection(
+        correctedPosition: Vec3(validation.x, validation.y, _z),
+        correctedVelocity: Vec3(
+          validation.velocityX,
+          validation.velocityY,
+          snapshot.velocity.z,
+        ),
+      );
+      _x = validation.x;
+      _y = validation.y;
+      _lastSnapshot = sixDof.snapshot;
+    }
+
+    if ((_inNoFlyZone || _isGeofenceWarning) &&
+        _isArmed &&
+        _status != SimulatorStatus.crashed &&
+        _status != SimulatorStatus.landed) {
+      feedback.triggerWarning();
+    }
   }
 
   void _applySnapshot(PhysicsSnapshot snapshot) {
@@ -683,15 +1087,15 @@ class SimulatorController extends ChangeNotifier {
   // Colisão com obstáculos 3D
   // ────────────────────────────────────────────────────────────
 
-  void _resolveWorldCollisions(PhysicsSnapshot snapshot) {
-    if (_status == SimulatorStatus.crashed) return;
+  double _resolveWorldCollisions(PhysicsSnapshot snapshot) {
+    if (_status == SimulatorStatus.crashed) return 999.0;
     if (_status == SimulatorStatus.landed ||
         _status == SimulatorStatus.disarmed) {
-      return;
+      return 999.0;
     }
 
     final obstacles = WorldGenerator.generateFor(activeMap);
-    if (obstacles.isEmpty) return;
+    if (obstacles.isEmpty) return 999.0;
 
     var east = snapshot.position.x;
     var north = snapshot.position.y;
@@ -705,8 +1109,22 @@ class SimulatorController extends ChangeNotifier {
     double impactSpeed = 0.0;
     double normalX = 0.0;
     double normalY = 0.0;
+    double minClearance = 999.0;
+    final trackClearance = _simulatorMode == SimulatorMode.freestyle;
 
     for (final WorldObstacle obstacle in obstacles) {
+      if (trackClearance && altitude < obstacle.height + 3.0) {
+        final distCenter =
+            sqrt(pow(east - obstacle.x, 2) + pow(north - obstacle.y, 2));
+        final approxRadius = obstacle.isCylindrical
+            ? obstacle.radius
+            : max(obstacle.width, obstacle.depth) * 0.5;
+        final clearance = distCenter - approxRadius;
+        if (clearance < minClearance) {
+          minClearance = clearance;
+        }
+      }
+
       if (altitude >= obstacle.height) continue;
       if (!obstacle.collidesAt(east, north, droneRadiusMeters)) continue;
 
@@ -724,7 +1142,7 @@ class SimulatorController extends ChangeNotifier {
       collided = true;
     }
 
-    if (!collided) return;
+    if (!collided) return minClearance;
 
     // Ricochete afastando da normal (restituição 0.35).
     final correctedVelocity = Vec3(
@@ -755,6 +1173,7 @@ class SimulatorController extends ChangeNotifier {
     if (impactSpeed >= crashImpactSpeedMs) {
       _triggerCrash(impactSpeed, Vec3(normalX, normalY, 0), _lastSnapshot!);
     }
+    return minClearance;
   }
 
   /// Dispara o estado de crash: corta os motores e registra o impacto.
@@ -771,6 +1190,7 @@ class SimulatorController extends ChangeNotifier {
     _lastCrashTimestamp = DateTime.now();
     _crashTimer = 0.0;
     _impactShake = 1.0;
+    feedback.triggerCrash(_crashImpactSpeedKmh);
 
     // Ricochete + giro violento proporcional à batida.
     final magnitude = (4.0 + 6.0 * (impactSpeedMs / 12.0)).clamp(4.0, 10.0);

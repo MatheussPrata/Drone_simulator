@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/models/flight_map.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 
@@ -147,12 +148,220 @@ class MapSettingsModal extends StatelessWidget {
                       ),
                     );
                   }),
+                  const SizedBox(height: 14),
+
+                  // ── Seção 3: Modo de Jogo & Perfil de Drone ──
+                  const Text(
+                    'MODO DE JOGO & DRONE',
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _modeChip('Voo Livre', SimulatorMode.freeFlight),
+                      _modeChip('Corrida 10 Portais', SimulatorMode.gateRace),
+                      _modeChip('Time Attack', SimulatorMode.timeAttack),
+                      _modeChip('Freestyle Acro', SimulatorMode.freestyle),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: DroneProfile.all.map((p) {
+                      final selected = controller.activeProfile.type == p.type;
+                      return ChoiceChip(
+                        label: Text(p.name, style: const TextStyle(fontSize: 11)),
+                        selected: selected,
+                        selectedColor: Colors.orangeAccent.withOpacity(0.28),
+                        onSelected: (_) => controller.selectDroneProfile(p),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // ── Seção 4: Iluminação & Vento ──
+                  const Text(
+                    'ILUMINAÇÃO & VENTO',
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _lightChip('Dia', TimeOfDayPreset.day),
+                      _lightChip('Pôr do Sol', TimeOfDayPreset.sunset),
+                      _lightChip('Noite', TimeOfDayPreset.night),
+                      _windChip('Sem Vento', 0.0),
+                      _windChip('Vento Padrão', 1.0),
+                      _windChip('Rajadas Fortes', 1.8),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // ── Seção 5: Calibração do Modo Acro / FPV & Áudio ──
+                  const Text(
+                    'AJUSTES ACRO / FPV & FEEDBACK',
+                    style: TextStyle(
+                      color: Colors.amberAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      _acroChip('Suave', AcroRatePreset.smooth),
+                      _acroChip('Padrão', AcroRatePreset.standard),
+                      _acroChip('Freestyle', AcroRatePreset.freestyle),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          'Expo: ${(controller.acroSettings.expo * 100).round()}%',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                        ),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: controller.acroSettings.expo.clamp(0.0, 0.85),
+                          min: 0.0,
+                          max: 0.85,
+                          activeColor: Colors.amberAccent,
+                          onChanged: (v) => controller.setAcroSettings(
+                            controller.acroSettings.copyWith(expo: v),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          'Uptilt FPV: ${controller.acroSettings.fpvUptiltDeg.round()}°',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                        ),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: controller.acroSettings.fpvUptiltDeg.clamp(0.0, 30.0),
+                          min: 0.0,
+                          max: 30.0,
+                          activeColor: Colors.amberAccent,
+                          onChanged: (v) => controller.setAcroSettings(
+                            controller.acroSettings.copyWith(fpvUptiltDeg: v),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Assistência de Horizonte no Acro',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.acroSettings.horizonAssist > 0.05,
+                    activeColor: Colors.amberAccent,
+                    onChanged: (v) => controller.setAcroSettings(
+                      controller.acroSettings.copyWith(
+                        horizonAssist: v ? 0.25 : 0.0,
+                      ),
+                    ),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Ghost do Recorde na Corrida',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.ghostEnabled,
+                    activeColor: Colors.cyanAccent,
+                    onChanged: controller.setGhostEnabled,
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Som dos Motores e Vibração Tátil',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.audioEnabled,
+                    activeColor: Colors.cyanAccent,
+                    onChanged: (v) {
+                      controller.setAudioEnabled(v);
+                      controller.setHapticsEnabled(v);
+                    },
+                  ),
                 ],
               ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _modeChip(String label, SimulatorMode mode) {
+    final selected = controller.simulatorMode == mode;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: selected,
+      selectedColor: Colors.lightGreenAccent.withOpacity(0.25),
+      onSelected: (_) => controller.setSimulatorMode(mode),
+    );
+  }
+
+  Widget _lightChip(String label, TimeOfDayPreset preset) {
+    final selected = controller.timeOfDay == preset;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: selected,
+      selectedColor: Colors.cyanAccent.withOpacity(0.25),
+      onSelected: (_) => controller.setTimeOfDay(preset),
+    );
+  }
+
+  Widget _windChip(String label, double mult) {
+    final selected = (controller.windMultiplier - mult).abs() < 0.05;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: selected,
+      selectedColor: Colors.lightBlueAccent.withOpacity(0.25),
+      onSelected: (_) => controller.setWindMultiplier(mult),
+    );
+  }
+
+  Widget _acroChip(String label, AcroRatePreset preset) {
+    final selected = controller.acroSettings.preset == preset;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: selected,
+      selectedColor: Colors.amberAccent.withOpacity(0.25),
+      onSelected: (_) => controller.setAcroPreset(preset),
     );
   }
 

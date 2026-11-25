@@ -36,6 +36,7 @@ class TelemetryHud extends StatelessWidget {
   final VoidCallback? onRth;
   final VoidCallback? onReset;
   final VoidCallback? onToggleCameraMode;
+  final VoidCallback? onOpenHomeMenu;
 
   final CameraViewMode cameraMode;
   final SimulatorController? controller;
@@ -55,6 +56,7 @@ class TelemetryHud extends StatelessWidget {
     this.onRth,
     this.onReset,
     this.onToggleCameraMode,
+    this.onOpenHomeMenu,
     this.cameraMode = CameraViewMode.fpv,
     this.controller,
     this.actionsPlacement = HudActionsPlacement.top,
@@ -69,8 +71,9 @@ class TelemetryHud extends StatelessWidget {
           final c = controller!;
           final dist = sqrt(c.x * c.x + c.y * c.y);
           final spd = c.speedKmh;
-          final geofenceWarn = dist >= 450.0;
-          final noFlyWarn = c.physics.state.inNoFlyZone;
+          final geofenceWarn =
+              dist >= c.activeMap.warningRadiusMeters || c.isGeofenceWarning;
+          final noFlyWarn = c.inNoFlyZone || c.physics.state.inNoFlyZone;
 
           return _buildHudContent(
             context: context,
@@ -84,6 +87,8 @@ class TelemetryHud extends StatelessWidget {
             flightModeLabel: c.flightModeLabel,
             onCycleFlightMode: c.cycleFlightMode,
             showVrs: c.inVortexRingState,
+            windSpeedMps: c.windSpeedMps,
+            windDirectionDeg: c.windDirectionDeg,
             takeoffCb: onTakeoff ?? (c.isLanded ? c.armAndTakeoff : null),
             landCb: onLand ?? (!c.isLanded ? c.land : null),
             rthCb: onRth ?? (!c.isLanded ? c.triggerRTH : null),
@@ -123,6 +128,8 @@ class TelemetryHud extends StatelessWidget {
     String? flightModeLabel,
     VoidCallback? onCycleFlightMode,
     bool showVrs = false,
+    double? windSpeedMps,
+    double windDirectionDeg = 0.0,
     required VoidCallback? takeoffCb,
     required VoidCallback? landCb,
     required VoidCallback? rthCb,
@@ -187,6 +194,8 @@ class TelemetryHud extends StatelessWidget {
                           value: '${curDist.toStringAsFixed(0)} m',
                           valueColor: Colors.white,
                         ),
+                        if (windSpeedMps != null)
+                          _buildWindPill(windSpeedMps, windDirectionDeg),
                         _buildBatteryPill(curBattery),
                       ],
                     ),
@@ -198,9 +207,13 @@ class TelemetryHud extends StatelessWidget {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (onOpenHomeMenu != null) ...[
+                            _buildMenuButton(onOpenHomeMenu!),
+                            const SizedBox(width: 6),
+                          ],
                           if (controller != null) ...[
                             _buildSimModeButton(
-                              isRaceMode: controller!.isRaceMode,
+                              mode: controller!.simulatorMode,
                               onTap: controller!.toggleSimulatorMode,
                             ),
                             const SizedBox(width: 6),
@@ -256,11 +269,97 @@ class TelemetryHud extends StatelessWidget {
     );
   }
 
+  Widget _buildMenuButton(VoidCallback onTap) {
+    const color = Colors.white70;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const Key('btn_open_home_menu'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white24, width: 1.0),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.home, size: 14, color: color),
+              SizedBox(width: 4),
+              Text(
+                'Menu',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWindPill(double windSpeedMps, double windDirectionDeg) {
+    final kmh = windSpeedMps * 3.6;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Transform.rotate(
+            angle: windDirectionDeg * pi / 180.0,
+            child: const Icon(Icons.navigation,
+                color: Colors.lightBlueAccent, size: 14),
+          ),
+          const SizedBox(width: 5),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'VENTO',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Text(
+                '${kmh.toStringAsFixed(0)} km/h',
+                style: const TextStyle(
+                  color: Colors.lightBlueAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSimModeButton({
-    required bool isRaceMode,
+    required SimulatorMode mode,
     VoidCallback? onTap,
   }) {
-    const color = Colors.lightGreenAccent;
+    final (label, icon, color) = switch (mode) {
+      SimulatorMode.freeFlight => ('VOO LIVRE', Icons.flight, Colors.lightGreenAccent),
+      SimulatorMode.gateRace => ('MODO JOGO', Icons.flag, Colors.lightGreenAccent),
+      SimulatorMode.timeAttack => ('TIME ATTACK', Icons.timer, Colors.orangeAccent),
+      SimulatorMode.freestyle => ('FREESTYLE', Icons.cyclone, Colors.purpleAccent),
+    };
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -277,15 +376,11 @@ class TelemetryHud extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                isRaceMode ? Icons.flag : Icons.flight,
-                size: 14,
-                color: color,
-              ),
+              Icon(icon, size: 14, color: color),
               const SizedBox(width: 5),
               Text(
-                isRaceMode ? 'MODO JOGO' : 'VOO LIVRE',
-                style: const TextStyle(
+                label,
+                style: TextStyle(
                   color: color,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,

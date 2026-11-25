@@ -58,6 +58,7 @@ class WorldGenerator {
     return jsonEncode({
       'scenario': scenario.name,
       'label': map.name,
+      'hasNoFlyZone': map.noFlyZones.isNotEmpty,
       'theme': themeFor(scenario),
       'obstacles': list,
     });
@@ -162,16 +163,79 @@ class WorldGenerator {
       radius: 2.6,
     ));
 
+    // Galpões urbanos de apoio em quarteirões afastados
+    for (final (id, hx, hy) in [
+      ('urban_hangar_1', -85.0, -95.0),
+      ('urban_hangar_2', 215.0, -90.0),
+      ('urban_hangar_3', -95.0, 235.0),
+    ]) {
+      if (!_overlapsAny(obstacles, hx, hy, 12.0)) {
+        obstacles.add(WorldObstacle(
+          id: id,
+          type: ObstacleType.hangar,
+          x: hx,
+          y: hy,
+          width: 18,
+          depth: 14,
+          height: 11,
+        ));
+      }
+    }
+
     return obstacles;
   }
 
   // ────────────────────────────────────────────────────────────
-  // Parque Florestal — bosque denso, clareira e trilhas
+  // Parque Florestal — bosque denso, clareira, pedras e torre de vigia
   // ────────────────────────────────────────────────────────────
 
   static List<WorldObstacle> _buildForest() {
     final rand = _Mulberry32(_seed + 101);
     final obstacles = <WorldObstacle>[];
+
+    // Cabana / base de apoio florestal fora da clareira central
+    obstacles.add(const WorldObstacle(
+      id: 'forest_cabin',
+      type: ObstacleType.hangar,
+      x: -155,
+      y: -145,
+      width: 14,
+      depth: 10,
+      height: 7.5,
+    ));
+
+    // Torre de vigia florestal (sem atrapalhar o circuito do bosque)
+    obstacles.add(const WorldObstacle(
+      id: 'forest_watchtower',
+      type: ObstacleType.tower,
+      x: 215,
+      y: -175,
+      height: 32,
+      radius: 2.8,
+    ));
+
+    // Rochas naturais nas bordas da floresta
+    var rocks = 0;
+    for (var i = 0; i < 120 && rocks < 14; i++) {
+      final angle = rand.next() * pi * 2;
+      final dist = 165 + rand.next() * 285;
+      final rx = cos(angle) * dist;
+      final ry = sin(angle) * dist;
+
+      if (rx.abs() < 16 || ry.abs() < 16) continue;
+      if (_overlapsAny(obstacles, rx, ry, 10.0)) continue;
+
+      final scale = 0.7 + rand.next() * 1.1;
+      obstacles.add(WorldObstacle(
+        id: 'forest_rock_$rocks',
+        type: ObstacleType.rock,
+        x: rx,
+        y: ry,
+        height: 7.0 * scale,
+        radius: 3.4 * scale,
+      ));
+      rocks++;
+    }
 
     var trees = 0;
     for (var i = 0; i < 900 && trees < 190; i++) {
@@ -184,6 +248,7 @@ class WorldGenerator {
       if (sqrt(tx * tx + ty * ty) < 30) continue;
       // Trilhas de terra em cruz
       if (tx.abs() < 10 || ty.abs() < 10) continue;
+      if (_overlapsAny(obstacles, tx, ty, 5.0)) continue;
 
       final scale = 0.9 + rand.next() * 0.9;
       obstacles.add(WorldObstacle(
@@ -219,7 +284,18 @@ class WorldGenerator {
       height: 34,
     ));
 
-    // Pilares da ponte sobre a represa (alinhados em Y)
+    // Estação técnica da barragem
+    obstacles.add(const WorldObstacle(
+      id: 'dam_station',
+      type: ObstacleType.hangar,
+      x: -292,
+      y: -185,
+      width: 22,
+      depth: 16,
+      height: 11,
+    ));
+
+    // Pilares da ponte sobre a represa (exatamente 6, alinhados em Y)
     for (var i = 0; i < 6; i++) {
       obstacles.add(WorldObstacle(
         id: 'pillar_$i',
@@ -232,24 +308,25 @@ class WorldGenerator {
       ));
     }
 
-    // Formação rochosa nas bordas (bloqueia aproximação do geofence)
+    // Formação rochosa escalonada nas margens e bordas do cânion
     var rocks = 0;
-    for (var i = 0; i < 200 && rocks < 26; i++) {
+    for (var i = 0; i < 240 && rocks < 34; i++) {
       final angle = rand.next() * pi * 2;
-      final dist = 330 + rand.next() * 150;
+      final dist = 285 + rand.next() * 195;
       final rx = cos(angle) * dist;
       final ry = sin(angle) * dist;
 
-      // Mantém o setor da barragem/ponte livre
-      if (rx < -260) continue;
+      // Mantém o setor da barragem, ponte e ilha central livres
+      if (rx < -250 || (ry + 60).abs() < 26) continue;
+      if (_overlapsAny(obstacles, rx, ry, 10.0)) continue;
 
-      final scale = 0.8 + rand.next() * 1.4;
+      final scale = 0.8 + rand.next() * 1.5;
       obstacles.add(WorldObstacle(
         id: 'rock_$rocks',
         type: ObstacleType.rock,
         x: rx,
         y: ry,
-        height: 12.0 * scale,
+        height: 13.0 * scale,
         radius: 4.5 * scale,
       ));
       rocks++;

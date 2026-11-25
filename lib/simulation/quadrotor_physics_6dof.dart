@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'package:drone_simulator/models/drone_profile.dart';
+
 /// Modos de voo reais suportados pelo controlador em cascata.
 enum FlightControlMode {
   /// Estabilizado (estilo DJI Normal): auto-nivelamento + Altitude Hold.
@@ -10,6 +12,73 @@ enum FlightControlMode {
 
   /// Acro / FPV Manual: controle direto de taxas angulares (deg/s) e empuxo manual.
   acro,
+}
+
+/// Presets de sensibilidade/agilidade para o modo Acro.
+enum AcroRatePreset { smooth, standard, freestyle }
+
+/// Configuração ajustável do modo Acro para pilotagem confortável em touch/FPV.
+class AcroSettings {
+  final AcroRatePreset preset;
+  final double maxRateDegPerSec;
+  final double expo;
+  final double horizonAssist;
+  final double fpvUptiltDeg;
+  final bool coordinatedTurn;
+
+  const AcroSettings({
+    this.preset = AcroRatePreset.standard,
+    this.maxRateDegPerSec = 140.0,
+    this.expo = 0.55,
+    this.horizonAssist = 0.25,
+    this.fpvUptiltDeg = 12.0,
+    this.coordinatedTurn = true,
+  });
+
+  factory AcroSettings.forPreset(
+    AcroRatePreset preset, {
+    double? expo,
+    double? horizonAssist,
+    double? fpvUptiltDeg,
+    bool? coordinatedTurn,
+  }) {
+    final defaultRate = switch (preset) {
+      AcroRatePreset.smooth => 110.0,
+      AcroRatePreset.standard => 140.0,
+      AcroRatePreset.freestyle => 320.0,
+    };
+    final defaultAssist = switch (preset) {
+      AcroRatePreset.smooth => 0.35,
+      AcroRatePreset.standard => 0.25,
+      AcroRatePreset.freestyle => 0.0,
+    };
+    return AcroSettings(
+      preset: preset,
+      maxRateDegPerSec: defaultRate,
+      expo: expo ?? (preset == AcroRatePreset.freestyle ? 0.62 : 0.55),
+      horizonAssist: horizonAssist ?? defaultAssist,
+      fpvUptiltDeg: fpvUptiltDeg ?? (preset == AcroRatePreset.freestyle ? 18.0 : 12.0),
+      coordinatedTurn: coordinatedTurn ?? true,
+    );
+  }
+
+  AcroSettings copyWith({
+    AcroRatePreset? preset,
+    double? maxRateDegPerSec,
+    double? expo,
+    double? horizonAssist,
+    double? fpvUptiltDeg,
+    bool? coordinatedTurn,
+  }) {
+    return AcroSettings(
+      preset: preset ?? this.preset,
+      maxRateDegPerSec: maxRateDegPerSec ?? this.maxRateDegPerSec,
+      expo: expo ?? this.expo,
+      horizonAssist: horizonAssist ?? this.horizonAssist,
+      fpvUptiltDeg: fpvUptiltDeg ?? this.fpvUptiltDeg,
+      coordinatedTurn: coordinatedTurn ?? this.coordinatedTurn,
+    );
+  }
 }
 
 /// Vetor 3D imutável para cálculos de física em ENU (X=Leste/Direita, Y=Norte/Frente, Z=Cima).
@@ -274,7 +343,8 @@ class _PidController {
 
 /// Motor de Física 6-DOF profissional com sub-stepping a 240 Hz.
 class QuadrotorPhysicsEngine {
-  final DronePhysicsParams params;
+  DronePhysicsParams params;
+  AcroSettings acroSettings;
 
   /// Passo fixo interno (240 Hz) para garantir estabilidade numérica dos PIDs.
   static const double _fixedSubstepDt = 1.0 / 240.0;
@@ -331,9 +401,39 @@ class QuadrotorPhysicsEngine {
 
   QuadrotorPhysicsEngine({
     this.params = const DronePhysicsParams(),
+    this.acroSettings = const AcroSettings(),
     this.baseWindWorld = const Vec3(1.8, -0.9, 0.0),
     this.turbulenceIntensity = 1.0,
   });
+
+  static DronePhysicsParams paramsForProfile(DroneProfile profile) {
+    switch (profile.type) {
+      case DroneProfileType.mini249g:
+        return const DronePhysicsParams();
+      case DroneProfileType.proCine900g:
+        return const DronePhysicsParams(
+          massKg: 1.65,
+          maxTotalThrustN: 42.0,
+          motorTimeConstantSec: 0.038,
+          inertia: Vec3(0.022, 0.022, 0.038),
+          dragAreaCdA: Vec3(0.065, 0.065, 0.145),
+          batteryCapacityWh: 62.0,
+        );
+      case DroneProfileType.fpvRacer:
+        return const DronePhysicsParams(
+          massKg: 0.85,
+          maxTotalThrustN: 44.0,
+          motorTimeConstantSec: 0.018,
+          inertia: Vec3(0.009, 0.009, 0.016),
+          dragAreaCdA: Vec3(0.038, 0.038, 0.090),
+          batteryCapacityWh: 28.0,
+        );
+    }
+  }
+
+  void updateParams(DronePhysicsParams newParams) {
+    params = newParams;
+  }
 
   bool get isArmed => _armed;
 
@@ -674,19 +774,72 @@ class QuadrotorPhysicsEngine {
         break;
 
       case FlightControlMode.acro:
-        // Taxas diretas com expo: resposta fina no centro do stick e taxa
-        // máxima moderada (~155°/s), sem o drone girar descontrolado.
-        double expo(double v) {
-          final magnitude = math.pow(v.abs(), 1.9).toDouble();
-          return (v < 0 ? -magnitude : magnitude) * 2.2;
+        // Curva Betaflight cúbica (precisão milimétrica no centro + resposta viva nas bordas).
+        final expo = acroSettings.expo.clamp(0.0, 0.90);
+        final maxRateRad = acroSettings.maxRateDegPerSec * math.pi / 180.0;
+
+        double rateCurve(double v) {
+          return v * (1.0 - expo) + v * v * v * expo;
         }
 
-        targetPitchRate = -expo(stickPitch);
-        targetRollRate = expo(stickRoll);
-        targetYawRate = -expo(stickYaw) * 0.65;
+        targetPitchRate = -rateCurve(stickPitch) * maxRateRad;
+        targetRollRate = rateCurve(stickRoll) * maxRateRad;
+        targetYawRate = -rateCurve(stickYaw) * maxRateRad * 0.72;
 
-        // Throttle manual: -1 = motores em marcha lenta (gravidade domina).
-        collectiveNormalized = (stickThrottle + 1.0) * 0.5;
+        // Assistência suave de nivelamento apenas com o stick solto e ângulo moderado,
+        // liberando 100% para flips/rolls quando há comando forte ou voo invertido.
+        final upBodyZ = _orientation.rotateBodyToWorld(const Vec3(0.0, 0.0, 1.0)).z;
+        final assist = acroSettings.horizonAssist.clamp(0.0, 0.65);
+        if (assist > 0.001 && upBodyZ > 0.20) {
+          if (stickPitch.abs() < 0.08 && euler.pitch.abs() < 0.95) {
+            targetPitchRate += -euler.pitch * assist * 3.0;
+          }
+          if (stickRoll.abs() < 0.08 && euler.roll.abs() < 0.95) {
+            targetRollRate += -euler.roll * assist * 3.0;
+          }
+        }
+
+        // Virada coordenada em curvas FPV (ajuda a alinhar o nariz ao inclinar o roll).
+        if (acroSettings.coordinatedTurn &&
+            stickYaw == 0.0 &&
+            upBodyZ > 0.25 &&
+            (_velocity.x * _velocity.x + _velocity.y * _velocity.y) > 4.0) {
+          targetYawRate += -math.sin(euler.roll) * 0.45;
+        }
+
+        // Curva de throttle centrada no ponto de hover para joysticks touch auto-centralizados:
+        // stick = 0 -> paira; stick = -1 -> marcha lenta (0.04, gravidade domina); stick = +1 -> 1.0.
+        final voltageSag = 0.86 + 0.14 * (_batteryPercent / 100.0);
+        final effectiveMaxThrust = params.maxTotalThrustN *
+            voltageSag *
+            voltageSag *
+            densityRatio *
+            _lastGroundEffect;
+        final hoverCmd = (params.massKg *
+                params.gravity /
+                math.max(1.0, effectiveMaxThrust))
+            .clamp(0.15, 0.72);
+
+        if (stickThrottle < 0.0) {
+          final t = (stickThrottle + 1.0).clamp(0.0, 1.0);
+          collectiveNormalized =
+              0.04 + (hoverCmd - 0.04) * math.pow(t, 1.15).toDouble();
+        } else {
+          collectiveNormalized = hoverCmd +
+              (1.0 - hoverCmd) * math.pow(stickThrottle, 1.15).toDouble();
+        }
+
+        // Compensação de inclinação e amortecimento vertical sutil perto do centro
+        // para curvas previsíveis sem disparar nem despencar.
+        if (upBodyZ > 0.30 && stickThrottle >= -0.15) {
+          final tiltComp = (1.0 / upBodyZ.clamp(0.55, 1.0)).clamp(1.0, 1.55);
+          collectiveNormalized = (collectiveNormalized * tiltComp).clamp(0.0, 0.88);
+          if (stickThrottle.abs() < 0.14) {
+            collectiveNormalized =
+                (collectiveNormalized - (_velocity.z * 0.042).clamp(-0.12, 0.12))
+                    .clamp(0.08, 0.88);
+          }
+        }
         break;
     }
 
@@ -695,14 +848,46 @@ class QuadrotorPhysicsEngine {
     final rollCmd = _rollRatePid.update(targetRollRate - _omegaBody.y, dt);
     final yawCmd = _yawRatePid.update(targetYawRate - _omegaBody.z, dt);
 
-    final base = collectiveNormalized.clamp(0.0, 1.0);
+    var base = collectiveNormalized.clamp(0.0, 1.0);
+    final deltas = <double>[
+      pitchCmd - rollCmd - yawCmd, // FR
+      -pitchCmd + rollCmd - yawCmd, // RL
+      pitchCmd + rollCmd + yawCmd, // FL
+      -pitchCmd - rollCmd + yawCmd, // RR
+    ];
+
+    // AirMode no Acro: preserva autoridade diferencial de pitch/roll mesmo em
+    // throttle reduzido (exceto em cut completo stickThrottle <= -0.85).
+    if (mode == FlightControlMode.acro && stickThrottle > -0.85) {
+      var minDelta = deltas[0];
+      var maxDelta = deltas[0];
+      for (int i = 1; i < 4; i++) {
+        if (deltas[i] < minDelta) minDelta = deltas[i];
+        if (deltas[i] > maxDelta) maxDelta = deltas[i];
+      }
+      final span = maxDelta - minDelta;
+      if (span > 1.0) {
+        final scale = 1.0 / span;
+        for (int i = 0; i < 4; i++) {
+          deltas[i] *= scale;
+        }
+        minDelta *= scale;
+        maxDelta *= scale;
+      }
+      if (base + maxDelta > 1.0) {
+        base = (1.0 - maxDelta).clamp(0.0, 1.0);
+      }
+      if (base + minDelta < 0.02) {
+        base = (0.02 - minDelta).clamp(0.0, 1.0);
+      }
+    }
 
     // Mixer em X (FR, RL, FL, RR) — consistente com os torques calculados:
     // tauPitch ∝ (t0+t2)-(t1+t3); tauRoll ∝ (t1+t2)-(t0+t3); tauYaw ∝ (t2+t3)-(t0+t1).
-    final m0 = (base + pitchCmd - rollCmd - yawCmd).clamp(0.0, 1.0); // FR
-    final m1 = (base - pitchCmd + rollCmd - yawCmd).clamp(0.0, 1.0); // RL
-    final m2 = (base + pitchCmd + rollCmd + yawCmd).clamp(0.0, 1.0); // FL
-    final m3 = (base - pitchCmd - rollCmd + yawCmd).clamp(0.0, 1.0); // RR
+    final m0 = (base + deltas[0]).clamp(0.0, 1.0); // FR
+    final m1 = (base + deltas[1]).clamp(0.0, 1.0); // RL
+    final m2 = (base + deltas[2]).clamp(0.0, 1.0); // FL
+    final m3 = (base + deltas[3]).clamp(0.0, 1.0); // RR
 
     return <double>[m0, m1, m2, m3];
   }
