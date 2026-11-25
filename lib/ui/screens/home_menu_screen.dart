@@ -115,7 +115,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       spacing: 8,
                       children: [
                         _presetChip(
-                          label: 'Suave (110°/s)',
+                          label: 'Suave (135°/s)',
                           selected: _acroSettings.preset == AcroRatePreset.smooth,
                           onTap: () {
                             setState(() => _acroSettings =
@@ -124,7 +124,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                           },
                         ),
                         _presetChip(
-                          label: 'Padrão (140°/s)',
+                          label: 'Padrão (175°/s)',
                           selected: _acroSettings.preset == AcroRatePreset.standard,
                           onTap: () {
                             setState(() => _acroSettings =
@@ -133,7 +133,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                           },
                         ),
                         _presetChip(
-                          label: 'Freestyle (320°/s)',
+                          label: 'Freestyle (310°/s)',
                           selected:
                               _acroSettings.preset == AcroRatePreset.freestyle,
                           onTap: () {
@@ -179,7 +179,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       activeColor: Colors.amberAccent,
                       onChanged: (enabled) {
                         setState(() => _acroSettings = _acroSettings.copyWith(
-                              horizonAssist: enabled ? 0.28 : 0.0,
+                              horizonAssist: enabled ? 0.48 : 0.0,
                             ));
                         setSheetState(() {});
                       },

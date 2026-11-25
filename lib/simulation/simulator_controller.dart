@@ -98,6 +98,8 @@ class SimulatorController extends ChangeNotifier {
   double _impactShake = 0.0;
   double _windSpeedMps = 0.0;
   double _windDirectionDeg = 116.5;
+  double _stableHeadingDeg = 0.0;
+  final List<(double, double)> _trailPoints = [];
   double _crashImpactSpeedKmh = 0.0;
   double _crashTimer = 0.0;
   DateTime? _lastCrashTimestamp;
@@ -141,6 +143,8 @@ class SimulatorController extends ChangeNotifier {
   double get y => _y;
   double get z => _z;
   double get yaw => _yaw;
+  double get radarHeadingDeg => _stableHeadingDeg;
+  List<(double, double)> get flightTrail => List.unmodifiable(_trailPoints);
   double get battery => _battery;
   double get speedKmh => _speedKmh;
   double get gimbalPitch => physics.gimbalPitch;
@@ -706,6 +710,8 @@ class SimulatorController extends ChangeNotifier {
     _y = 0.0;
     _z = 0.0;
     _yaw = 0.0;
+    _stableHeadingDeg = 0.0;
+    _trailPoints.clear();
     _speedKmh = 0.0;
     _manualThrottle = 0.0;
     _manualYaw = 0.0;
@@ -958,6 +964,25 @@ class SimulatorController extends ChangeNotifier {
     _y = snapshot.position.y;
     _z = snapshot.position.z;
     _yaw = ((-snapshot.yawRad * 180.0 / pi) % 360.0 + 360.0) % 360.0;
+    if (snapshot.orientation.rotateBodyToWorld(const Vec3(0.0, 0.0, 1.0)).z >
+        0.35) {
+      _stableHeadingDeg = _yaw;
+    }
+    if (_isArmed && _z > 0.25) {
+      if (_trailPoints.isEmpty) {
+        _trailPoints.add((_x, _y));
+      } else {
+        final (lx, ly) = _trailPoints.last;
+        final dx = _x - lx;
+        final dy = _y - ly;
+        if (dx * dx + dy * dy >= 6.25) {
+          _trailPoints.add((_x, _y));
+          if (_trailPoints.length > 45) {
+            _trailPoints.removeAt(0);
+          }
+        }
+      }
+    }
     _speedKmh = snapshot.speedKmh;
     _battery = snapshot.batteryPercent;
     _windSpeedMps = snapshot.windVelocityWorld.length;

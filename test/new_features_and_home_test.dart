@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:drone_simulator/main.dart';
 import 'package:drone_simulator/models/flight_map.dart';
@@ -13,6 +14,7 @@ import 'package:drone_simulator/simulation/race_manager.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/ui/screens/home_menu_screen.dart';
 import 'package:drone_simulator/widgets/game_hud_overlay.dart';
+import 'package:drone_simulator/widgets/mini_map_widget.dart';
 
 void main() {
   group('Página Inicial, Novos Modos, Acro Aprimorado, Recordes e Ghost', () {
@@ -269,8 +271,83 @@ void main() {
       expect(html.contains('window.setLightingPreset'), isTrue);
       expect(html.contains('ghostGroup'), isTrue);
       expect(html.contains('isAcroFpv'), isTrue);
+      expect(html.contains('lockedChaseYawRad'), isTrue);
+      expect(html.contains('maneuverZoom'), isTrue);
       expect(html.contains('createGroundTexture'), isTrue);
       expect(html.contains('cdn.jsdelivr.net'), isFalse);
+    });
+
+    test('Acro recupera o horizonte ao soltar o stick e corta empuxo quando invertido',
+        () {
+      final engine = QuadrotorPhysicsEngine(
+        baseWindWorld: Vec3.zero,
+        turbulenceIntensity: 0.0,
+        acroSettings: AcroSettings.forPreset(AcroRatePreset.freestyle),
+      );
+      engine.reset(position: const Vec3(0, 0, 50));
+      engine.setArmed(true);
+
+      // Comanda flip até inclinar além de 90° (invertido).
+      var sawInvertedLowThrust = false;
+      for (var i = 0; i < 60; i++) {
+        final snap = engine.step(
+          input: const PilotStickInput(pitch: 1.0, throttle: 0.0),
+          dt: 1.0 / 60.0,
+          mode: FlightControlMode.acro,
+        );
+        final upZ = snap.orientation.rotateBodyToWorld(const Vec3(0, 0, 1)).z;
+        final avgRpm = snap.motorNormalizedRpm.reduce((a, b) => a + b) / 4.0;
+        if (upZ < 0.0 && avgRpm < 0.45) {
+          sawInvertedLowThrust = true;
+        }
+      }
+      expect(sawInvertedLowThrust, isTrue,
+          reason: 'Deve cortar o empuxo invertido durante o flip 360°');
+
+      // Solta o stick: deve voltar ao nível de voo normal.
+      for (var i = 0; i < 120; i++) {
+        engine.step(
+          input: PilotStickInput.neutral,
+          dt: 1.0 / 60.0,
+          mode: FlightControlMode.acro,
+        );
+      }
+      final finalUpZ =
+          engine.snapshot.orientation.rotateBodyToWorld(const Vec3(0, 0, 1)).z;
+      expect(finalUpZ, greaterThan(0.92),
+          reason: 'Horizon-Flow deve nivelar o drone ao soltar o stick');
+    });
+
+    testWidgets('MiniMapWidget exibe camadas táticas de obstáculos, cone e portais',
+        (tester) async {
+      final controller = SimulatorController(
+        records: RecordsRepository(store: InMemoryKeyValueStore()),
+      );
+      addTearDown(controller.dispose);
+      controller.setSimulatorMode(SimulatorMode.gateRace);
+      controller.armAndTakeoff();
+      controller.setPosition(15.0, 25.0, 18.0);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox.expand(
+              child: MiniMapWidget(
+                controller: controller,
+                showControls: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      tester.takeException();
+
+      expect(find.byType(PolygonLayer), findsOneWidget);
+      expect(find.byType(PolylineLayer), findsOneWidget);
+      expect(find.byType(CircleLayer), findsOneWidget);
+      expect(find.byType(MarkerLayer), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
     });
 
     testWidgets('GameHudOverlay exibe painel de Freestyle e banner de manobra',

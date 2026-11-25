@@ -287,7 +287,7 @@ class MapSettingsModal extends StatelessWidget {
                     activeColor: Colors.amberAccent,
                     onChanged: (v) => controller.setAcroSettings(
                       controller.acroSettings.copyWith(
-                        horizonAssist: v ? 0.25 : 0.0,
+                        horizonAssist: v ? 0.48 : 0.0,
                       ),
                     ),
                   ),

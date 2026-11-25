@@ -1186,6 +1186,11 @@
       var uptiltThreeQuat = new THREE.Quaternion();
       var fpvFullQuat = new THREE.Quaternion();
       var chaseTempCam = new THREE.PerspectiveCamera();
+      var lockedChaseYawRad = 0.0;
+      var maneuverZoom = 0.0;
+      var maneuverHoldTimer = 0.0;
+      var droneUpVec = new THREE.Vector3();
+      var droneFwdVec = new THREE.Vector3();
 
       // ── API Exposta para o Flutter ──
       window.updateDroneState = function (jsonState) {
@@ -1330,14 +1335,49 @@
         var fpvLookY = droneY + Math.sin(pitchRad) * 10.0;
         var fpvLookZ = droneZ - Math.cos(yawRad) * cosPitch * 10.0;
 
-        // ── Pose 3ª pessoa: spring-damper com amortecimento por eixo ──
-        var targetCamX = droneX + Math.sin(yawRad) * 5.5;
-        var targetCamY = Math.max(0.4, droneY + 2.2);
-        var targetCamZ = droneZ + Math.cos(yawRad) * 5.5;
+        // Detecta manobra 360° (flip / barrel roll / mergulho extremo) para travar
+        // o rumo e afastar suavemente a câmera em 3ª pessoa sem girar junto.
+        bodyThreeQuat.set(droneState.qx, droneState.qz, -droneState.qy, droneState.qw).normalize();
+        droneUpVec.set(0, 1, 0).applyQuaternion(bodyThreeQuat);
+        droneFwdVec.set(0, 0, -1).applyQuaternion(bodyThreeQuat);
+        var isFlipping360 = droneState.isArmed &&
+          (droneUpVec.y < 0.55 || Math.abs(droneFwdVec.y) > 0.78);
 
-        var targetLookX = droneX - Math.sin(yawRad) * 2.0;
+        if (!droneState.isArmed) {
+          lockedChaseYawRad = yawRad;
+          maneuverHoldTimer = 0.0;
+        } else if (isFlipping360) {
+          maneuverHoldTimer = 0.25;
+        } else {
+          if (maneuverHoldTimer > 0.0) {
+            maneuverHoldTimer = Math.max(0.0, maneuverHoldTimer - dt);
+          }
+          var horizYaw = Math.atan2(-droneFwdVec.x, -droneFwdVec.z);
+          var dyaw = horizYaw - lockedChaseYawRad;
+          while (dyaw > Math.PI) dyaw -= Math.PI * 2.0;
+          while (dyaw < -Math.PI) dyaw += Math.PI * 2.0;
+          lockedChaseYawRad += dyaw * (1.0 - Math.exp(-8.0 * dt));
+        }
+
+        var zoomTarget = (isFlipping360 || maneuverHoldTimer > 0.0) ? 1.0 : 0.0;
+        var zoomK = zoomTarget > 0.5
+          ? (1.0 - Math.exp(-10.0 * dt))
+          : (1.0 - Math.exp(-3.0 * dt));
+        maneuverZoom += (zoomTarget - maneuverZoom) * zoomK;
+
+        // ── Pose 3ª pessoa: spring-damper com trava de yaw e afastamento em 360° ──
+        var effectiveYaw = droneState.isArmed ? lockedChaseYawRad : yawRad;
+        var chaseDist = 5.5 + 3.2 * maneuverZoom;
+        var chaseHeight = 2.2 + 0.9 * maneuverZoom;
+        var lookAhead = 2.0 * (1.0 - maneuverZoom);
+
+        var targetCamX = droneX + Math.sin(effectiveYaw) * chaseDist;
+        var targetCamY = Math.max(0.4, droneY + chaseHeight);
+        var targetCamZ = droneZ + Math.cos(effectiveYaw) * chaseDist;
+
+        var targetLookX = droneX - Math.sin(effectiveYaw) * lookAhead;
         var targetLookY = droneY + 0.5;
-        var targetLookZ = droneZ - Math.cos(yawRad) * 2.0;
+        var targetLookZ = droneZ - Math.cos(effectiveYaw) * lookAhead;
 
         if (!chaseInitialized) {
           chaseSpringPos.set(targetCamX, targetCamY, targetCamZ);
@@ -1369,7 +1409,6 @@
           droneState.isArmed &&
           blend < 0.99;
         if (isAcroFpv) {
-          bodyThreeQuat.set(droneState.qx, droneState.qz, -droneState.qy, droneState.qw).normalize();
           var tiltRad = ((droneState.fpvUptiltDeg || 0.0) + (droneState.gimbalPitch || 0.0)) * Math.PI / 180.0;
           uptiltThreeQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), tiltRad);
           fpvFullQuat.copy(bodyThreeQuat).multiply(uptiltThreeQuat);
@@ -1379,7 +1418,7 @@
           } else {
             chaseTempCam.position.copy(chaseSpringPos);
             chaseTempCam.lookAt(chaseSpringLook);
-            chaseTempCam.rotateZ(rollRad * 0.25);
+            chaseTempCam.rotateZ((rollRad * 0.25) * (1.0 - maneuverZoom));
             camera.quaternion.copy(fpvFullQuat).slerp(chaseTempCam.quaternion, blend);
           }
         } else {
@@ -1388,8 +1427,9 @@
           var lookZ = fpvLookZ + (chaseSpringLook.z - fpvLookZ) * blend;
           camera.lookAt(lookX, lookY, lookZ);
 
-          // Horizonte inclina apenas de leve na 3ª pessoa (roll * 0.25).
-          camera.rotateZ(rollRad * 0.25 * blend);
+          // Horizonte inclina apenas de leve na 3ª pessoa (roll * 0.25), e trava reto no 360°.
+          var camRoll = rollRad * 0.25 * blend;
+          camera.rotateZ(camRoll * (1.0 - maneuverZoom));
         }
 
         // Efeito leve de FOV dinâmico com velocidade para sensação de imersão.
