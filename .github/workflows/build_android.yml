@@ -23,6 +23,49 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Configurar espelho Maven Central e retries do Gradle
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat <<'EOF' > ~/.gradle/init.d/maven-mirror.gradle
+          def mirrorUrl = "https://maven-central.storage-download.googleapis.com/maven2/"
+          def rewriteRepos = { repos ->
+            repos.all { repo ->
+              if (repo instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+                def u = repo.url.toString()
+                if (u.contains("repo.maven.apache.org/maven2") || u.contains("repo1.maven.org/maven2")) {
+                  repo.setUrl(mirrorUrl)
+                }
+              }
+            }
+          }
+
+          gradle.settingsEvaluated { settings ->
+            rewriteRepos(settings.pluginManagement.repositories)
+            rewriteRepos(settings.dependencyResolutionManagement.repositories)
+          }
+
+          gradle.allprojects { project ->
+            rewriteRepos(project.buildscript.repositories)
+            rewriteRepos(project.repositories)
+          }
+          EOF
+          cat <<'EOF' >> ~/.gradle/gradle.properties
+          systemProp.org.gradle.internal.http.connectionTimeout=120000
+          systemProp.org.gradle.internal.http.socketTimeout=120000
+          org.gradle.internal.repository.max.tentatives=5
+          org.gradle.internal.repository.initial.backoff=2000
+          EOF
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
