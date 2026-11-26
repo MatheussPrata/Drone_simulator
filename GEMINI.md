@@ -64,5 +64,10 @@
   - `flutter analyze --no-fatal-infos --no-fatal-warnings`: `No issues found!`.
   - `flutter test`: **187 testes passando** (incluindo [block4_modes_and_garage_test.dart](test/block4_modes_and_garage_test.dart)).
 
+### Concluído (Bloco 5 — Limpeza da árvore legada)
+- Removidos `lib/ui/screens/simulator_screen.dart`, `lib/providers/simulation_provider.dart` e toda a pasta `lib/ui/widgets/` (shims de re-export + `telemetry_bar`, `artificial_horizon`, `virtual_joysticks` legados), que não eram usados pela tela ativa `FlightSimulatorScreen` ([main.dart](lib/main.dart)).
+- Removida a dependência `flutter_riverpod` do [pubspec.yaml](pubspec.yaml) (usada apenas pela árvore legada).
+- Mantido `lib/engine/flight_physics_engine.dart` (ainda usado por `lib/simulation/flight_physics.dart`, `SimulatorController` e testes).
+
 ### Próximo Passo Pendente
-- **Limpeza opcional:** Avaliar remoção/unificação da árvore legada (`lib/ui/screens/simulator_screen.dart`, `lib/providers/simulation_provider.dart`, `lib/ui/widgets/`).
+- Roadmap de melhorias (Blocos 1–5) concluído. Próximos passos dependem de novas solicitações (ex.: gerar APK sob demanda).

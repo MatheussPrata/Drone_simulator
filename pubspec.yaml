@@ -11,7 +11,6 @@ dependencies:
     sdk: flutter
   flutter_map: ^6.1.0
   latlong2: ^0.9.1
-  flutter_riverpod: ^2.4.9
   webview_flutter: ^4.10.0
 
 dev_dependencies:
