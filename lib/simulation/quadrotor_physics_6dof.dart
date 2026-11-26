@@ -84,6 +84,57 @@ class AcroSettings {
       coordinatedTurn: coordinatedTurn ?? this.coordinatedTurn,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'preset': preset.name,
+        'maxRateDegPerSec': maxRateDegPerSec,
+        'expo': expo,
+        'horizonAssist': horizonAssist,
+        'fpvUptiltDeg': fpvUptiltDeg,
+        'coordinatedTurn': coordinatedTurn,
+      };
+
+  factory AcroSettings.fromJson(Map<String, dynamic> json) {
+    final rawPreset = json['preset'];
+    final preset = AcroRatePreset.values.firstWhere(
+      (e) => e.name == rawPreset,
+      orElse: () => AcroRatePreset.standard,
+    );
+    return AcroSettings(
+      preset: preset,
+      maxRateDegPerSec:
+          (json['maxRateDegPerSec'] as num?)?.toDouble().clamp(60.0, 600.0) ??
+              175.0,
+      expo: (json['expo'] as num?)?.toDouble().clamp(0.0, 0.90) ?? 0.50,
+      horizonAssist:
+          (json['horizonAssist'] as num?)?.toDouble().clamp(0.0, 0.75) ?? 0.48,
+      fpvUptiltDeg:
+          (json['fpvUptiltDeg'] as num?)?.toDouble().clamp(0.0, 30.0) ?? 10.0,
+      coordinatedTurn: (json['coordinatedTurn'] as bool?) ?? true,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AcroSettings &&
+          runtimeType == other.runtimeType &&
+          preset == other.preset &&
+          maxRateDegPerSec == other.maxRateDegPerSec &&
+          expo == other.expo &&
+          horizonAssist == other.horizonAssist &&
+          fpvUptiltDeg == other.fpvUptiltDeg &&
+          coordinatedTurn == other.coordinatedTurn;
+
+  @override
+  int get hashCode => Object.hash(
+        preset,
+        maxRateDegPerSec,
+        expo,
+        horizonAssist,
+        fpvUptiltDeg,
+        coordinatedTurn,
+      );
 }
 
 /// Vetor 3D imutável para cálculos de física em ENU (X=Leste/Direita, Y=Norte/Frente, Z=Cima).

@@ -59,6 +59,9 @@ class SimulatorController extends ChangeNotifier {
   /// Coeficiente de restituição do ricochete em obstáculos.
   static const double collisionRestitution = 0.35;
 
+  /// Tolerância vertical para capturar o topo de um telhado caminhável (m).
+  static const double roofSnapMargin = 0.45;
+
   final FlightPhysics physics;
   final QuadrotorPhysicsEngine sixDof;
   final RecordsRepository records;
@@ -83,6 +86,11 @@ class SimulatorController extends ChangeNotifier {
   double _windMultiplier = 1.0;
   bool _ghostEnabled = true;
   bool _lastRunWasNewRecord = false;
+  bool _hasExplicitAcroOverride = false;
+  double _currentGroundHeightM = 0.0;
+  double _takeoffTargetAltitude = targetTakeoffAltitude;
+  double _landingTargetX = 0.0;
+  double _landingTargetY = 0.0;
 
   RaceManager? _raceManager;
   FreestyleManager? _freestyleManager;
@@ -130,8 +138,14 @@ class SimulatorController extends ChangeNotifier {
     _applyMapWind(this.physics.activeMap);
     this.sixDof.updateParams(
         QuadrotorPhysicsEngine.paramsForProfile(this.physics.state.activeProfile));
+    if (this.records.hasSavedAcroSettings) {
+      this.sixDof.acroSettings = this.records.acroSettings;
+    }
     this.records.loadAll().then((_) {
       if (_disposed) return;
+      if (!_hasExplicitAcroOverride && this.records.hasSavedAcroSettings) {
+        this.sixDof.acroSettings = this.records.acroSettings;
+      }
       _syncSavedBestTimeToRaceManager();
       _safeNotify();
     });
@@ -142,6 +156,8 @@ class SimulatorController extends ChangeNotifier {
   double get x => _x;
   double get y => _y;
   double get z => _z;
+  double get currentGroundHeightM => _currentGroundHeightM;
+  double get altitudeAgl => max(0.0, _z - _currentGroundHeightM);
   double get yaw => _yaw;
   double get radarHeadingDeg => _stableHeadingDeg;
   List<(double, double)> get flightTrail => List.unmodifiable(_trailPoints);
@@ -315,7 +331,9 @@ class SimulatorController extends ChangeNotifier {
     _timeOfDay = timeOfDay;
     _flightMode = flightMode;
     if (flightMode == FlightControlMode.acro &&
-        mode == SimulatorMode.freestyle) {
+        mode == SimulatorMode.freestyle &&
+        !_hasExplicitAcroOverride &&
+        !records.hasSavedAcroSettings) {
       sixDof.acroSettings =
           AcroSettings.forPreset(AcroRatePreset.freestyle);
     }
@@ -560,18 +578,23 @@ class SimulatorController extends ChangeNotifier {
   }
 
   /// Ajusta parâmetros avançados do modo Acro.
-  void setAcroSettings(AcroSettings settings) {
+  void setAcroSettings(AcroSettings settings, {bool persist = true}) {
+    _hasExplicitAcroOverride = true;
     sixDof.acroSettings = settings;
+    if (persist) {
+      records.saveAcroSettings(settings);
+    }
     notifyListeners();
   }
 
   /// Aplica um preset rápido de agilidade Acro (Suave, Padrão ou Freestyle).
-  void setAcroPreset(AcroRatePreset preset) {
-    sixDof.acroSettings = AcroSettings.forPreset(
+  void setAcroPreset(AcroRatePreset preset, {bool persist = true}) {
+    final updated = AcroSettings.forPreset(
       preset,
       fpvUptiltDeg: sixDof.acroSettings.fpvUptiltDeg,
+      coordinatedTurn: sixDof.acroSettings.coordinatedTurn,
     );
-    notifyListeners();
+    setAcroSettings(updated, persist: persist);
   }
 
   void setGhostEnabled(bool enabled) {
@@ -665,15 +688,17 @@ class SimulatorController extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Arma os motores e sobe automaticamente até 10 m (física real).
+  /// Arma os motores e sobe automaticamente até 10 m acima da superfície atual.
   void armAndTakeoff() {
     if (_status == SimulatorStatus.crashed) {
       reset();
     }
+    _currentGroundHeightM = _computeGroundHeightAt(_x, _y, _z);
+    _takeoffTargetAltitude = _currentGroundHeightM + targetTakeoffAltitude;
     _isArmed = true;
     _status = SimulatorStatus.takingOff;
     sixDof.reset(
-      position: Vec3(_x, _y, max(_z, 0.03)),
+      position: Vec3(_x, _y, max(_z, _currentGroundHeightM + 0.03)),
       yawRad: -_yaw * pi / 180.0,
       batteryPercent: _battery,
     );
@@ -681,13 +706,15 @@ class SimulatorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Inicia a descida até o solo.
+  /// Inicia a descida até a superfície abaixo do drone (solo ou telhado).
   void land() {
     if (_status == SimulatorStatus.landed ||
         _status == SimulatorStatus.disarmed ||
         _status == SimulatorStatus.crashed) {
       return;
     }
+    _landingTargetX = _x;
+    _landingTargetY = _y;
     _status = SimulatorStatus.landing;
     notifyListeners();
   }
@@ -709,6 +736,10 @@ class SimulatorController extends ChangeNotifier {
     _x = 0.0;
     _y = 0.0;
     _z = 0.0;
+    _currentGroundHeightM = 0.0;
+    _takeoffTargetAltitude = targetTakeoffAltitude;
+    _landingTargetX = 0.0;
+    _landingTargetY = 0.0;
     _yaw = 0.0;
     _stableHeadingDeg = 0.0;
     _trailPoints.clear();
@@ -772,6 +803,7 @@ class SimulatorController extends ChangeNotifier {
     _x = newX;
     _y = newY;
     if (newZ != null) _z = newZ;
+    _currentGroundHeightM = _computeGroundHeightAt(_x, _y, _z);
     _syncSixDofPosition();
     notifyListeners();
   }
@@ -816,6 +848,24 @@ class SimulatorController extends ChangeNotifier {
     }
   }
 
+  double _computeGroundHeightAt(
+    double east,
+    double north,
+    double currentAltitude,
+  ) {
+    double surface = 0.0;
+    final obstacles = WorldGenerator.generateFor(activeMap);
+    for (final obstacle in obstacles) {
+      if (!obstacle.isWalkableRoof) continue;
+      if (!obstacle.coversPoint(east, north)) continue;
+      if (currentAltitude >= obstacle.height - roofSnapMargin &&
+          obstacle.height > surface) {
+        surface = obstacle.height;
+      }
+    }
+    return surface;
+  }
+
   // ────────────────────────────────────────────────────────────
   // Loop principal
   // ────────────────────────────────────────────────────────────
@@ -844,19 +894,22 @@ class SimulatorController extends ChangeNotifier {
 
     final input = _buildStickInput();
     final previousVz = _lastSnapshot?.velocity.z ?? 0.0;
+    final groundHeightM = _computeGroundHeightAt(_x, _y, _z);
+    _currentGroundHeightM = groundHeightM;
     var snapshot = sixDof.step(
       input: input,
       dt: dt,
       mode: _flightMode,
-      groundHeightM: 0.0,
+      groundHeightM: groundHeightM,
     );
 
     _applySnapshot(snapshot);
     final minClearance = _resolveWorldCollisions(snapshot);
     snapshot = _lastSnapshot ?? snapshot;
     _enforceGeofenceAndNfz(snapshot);
+    _currentGroundHeightM = _computeGroundHeightAt(_x, _y, _z);
 
-    // Impacto violento no solo durante voo armado.
+    // Impacto violento no solo ou telhado durante voo armado.
     if (_status != SimulatorStatus.crashed &&
         snapshot.isGrounded &&
         previousVz < -hardGroundImpactMs) {
@@ -992,7 +1045,8 @@ class SimulatorController extends ChangeNotifier {
   PilotStickInput _buildStickInput() {
     switch (_status) {
       case SimulatorStatus.takingOff:
-        final throttle = ((targetTakeoffAltitude - _z) * 0.6).clamp(-0.3, 1.0);
+        final throttle =
+            ((_takeoffTargetAltitude - _z) * 0.6).clamp(-0.3, 1.0);
         return PilotStickInput(throttle: throttle);
 
       case SimulatorStatus.rth:
@@ -1024,7 +1078,7 @@ class SimulatorController extends ChangeNotifier {
         );
 
       case SimulatorStatus.landing:
-        // Desce mantendo correção horizontal suave em direção ao Home.
+        // Desce mantendo correção horizontal suave sobre o ponto alvo de pouso.
         final yawRadNow = _lastSnapshot?.yawRad ?? 0.0;
         final forwardX = -sin(yawRadNow);
         final forwardY = cos(yawRadNow);
@@ -1033,8 +1087,8 @@ class SimulatorController extends ChangeNotifier {
         final vx = _lastSnapshot?.velocity.x ?? 0.0;
         final vy = _lastSnapshot?.velocity.y ?? 0.0;
 
-        final errVx = (-_x * 0.9).clamp(-3.0, 3.0) - vx;
-        final errVy = (-_y * 0.9).clamp(-3.0, 3.0) - vy;
+        final errVx = ((_landingTargetX - _x) * 0.9).clamp(-3.0, 3.0) - vx;
+        final errVy = ((_landingTargetY - _y) * 0.9).clamp(-3.0, 3.0) - vy;
 
         return PilotStickInput(
           throttle: -1.0,
@@ -1063,7 +1117,7 @@ class SimulatorController extends ChangeNotifier {
   void _advanceStatusMachine() {
     switch (_status) {
       case SimulatorStatus.takingOff:
-        if (_z >= targetTakeoffAltitude - 0.15) {
+        if (_z >= _takeoffTargetAltitude - 0.15) {
           _status = SimulatorStatus.hovering;
         }
         break;
@@ -1073,15 +1127,17 @@ class SimulatorController extends ChangeNotifier {
           // Alinhado ao Home: encaixa o ponto de pouso e inicia a descida.
           _x = 0.0;
           _y = 0.0;
+          _landingTargetX = 0.0;
+          _landingTargetY = 0.0;
           _status = SimulatorStatus.landing;
         }
         break;
 
       case SimulatorStatus.landing:
-        if (_z <= 0.08) {
-          _z = 0.0;
-          // Pouso automático: encaixa no Home se já estiver próximo.
-          if (sqrt(_x * _x + _y * _y) <= 2.5) {
+        if (_z <= _currentGroundHeightM + 0.08) {
+          _z = _currentGroundHeightM;
+          // Pouso automático no solo: encaixa no Home se já estiver próximo.
+          if (_currentGroundHeightM <= 0.01 && sqrt(_x * _x + _y * _y) <= 2.5) {
             _x = 0.0;
             _y = 0.0;
           }
@@ -1093,8 +1149,8 @@ class SimulatorController extends ChangeNotifier {
 
       case SimulatorStatus.crashed:
         // Mantém o card de queda visível por um instante antes de encerrar.
-        if (_z <= 0.02 && _crashTimer >= 0.5) {
-          _z = 0.0;
+        if (_z <= _currentGroundHeightM + 0.02 && _crashTimer >= 0.5) {
+          _z = _currentGroundHeightM;
           _status = SimulatorStatus.landed;
           _isArmed = false;
         }
@@ -1150,7 +1206,12 @@ class SimulatorController extends ChangeNotifier {
         }
       }
 
-      if (altitude >= obstacle.height) continue;
+      if (altitude >= obstacle.height - 0.05) continue;
+      if (obstacle.isWalkableRoof &&
+          obstacle.coversPoint(east, north) &&
+          altitude >= obstacle.height - roofSnapMargin) {
+        continue;
+      }
       if (!obstacle.collidesAt(east, north, droneRadiusMeters)) continue;
 
       final resolved = obstacle.resolve(east, north, droneRadiusMeters);

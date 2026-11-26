@@ -86,6 +86,7 @@ class FlightSimulatorScreen extends StatefulWidget {
 
 class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   late final SimulatorController _controller;
+  bool _lastIsMapPrimaryView = false;
 
   bool get _isFpvMain => !_controller.isMapPrimaryView;
 
@@ -94,7 +95,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
     super.initState();
     _controller = SimulatorController(records: widget.recordsRepository);
     if (widget.initialAcroSettings != null) {
-      _controller.setAcroSettings(widget.initialAcroSettings!);
+      _controller.setAcroSettings(widget.initialAcroSettings!, persist: false);
     }
     _controller.setAudioEnabled(widget.initialAudioEnabled);
     _controller.setHapticsEnabled(widget.initialHapticsEnabled);
@@ -113,6 +114,7 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
         timeOfDay: widget.initialTimeOfDay,
       );
     }
+    _lastIsMapPrimaryView = _controller.isMapPrimaryView;
     _controller.start();
     _controller.addListener(_onControllerTick);
   }
@@ -130,7 +132,12 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   }
 
   void _onControllerTick() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final currentMapPrimary = _controller.isMapPrimaryView;
+    if (currentMapPrimary != _lastIsMapPrimaryView) {
+      _lastIsMapPrimaryView = currentMapPrimary;
+      setState(() {});
+    }
   }
 
   @override

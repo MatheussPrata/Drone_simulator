@@ -33,8 +33,17 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
   void initState() {
     super.initState();
     _records = widget.recordsRepository ?? RecordsRepository();
+    if (_records.hasSavedAcroSettings) {
+      _acroSettings = _records.acroSettings;
+    }
     _records.loadAll().then((_) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {
+          if (_records.hasSavedAcroSettings) {
+            _acroSettings = _records.acroSettings;
+          }
+        });
+      }
     });
   }
 
@@ -43,10 +52,13 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
       _selectedMode = mode;
       if (mode == SimulatorMode.freestyle) {
         _selectedFlightMode = FlightControlMode.acro;
-        _acroSettings = AcroSettings.forPreset(
-          AcroRatePreset.freestyle,
-          fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
-        );
+        if (!_records.hasSavedAcroSettings) {
+          _acroSettings = AcroSettings.forPreset(
+            AcroRatePreset.freestyle,
+            fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
+            coordinatedTurn: _acroSettings.coordinatedTurn,
+          );
+        }
       }
     });
   }
@@ -69,7 +81,13 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
       ),
     );
     await _records.loadAll();
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        if (_records.hasSavedAcroSettings) {
+          _acroSettings = _records.acroSettings;
+        }
+      });
+    }
   }
 
   void _openAcroSheet() {
@@ -79,8 +97,17 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
+          void applyAcro(AcroSettings updated) {
+            setState(() => _acroSettings = updated);
+            setSheetState(() {});
+            _records.saveAcroSettings(updated);
+          }
+
           return SafeArea(
             child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height - 28,
+              ),
               margin: const EdgeInsets.all(14),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -88,104 +115,140 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.amberAccent.withOpacity(0.6)),
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Calibração do Modo ACRO / FPV',
-                          style: TextStyle(
-                            color: Colors.amberAccent,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                          ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Calibração do Modo ACRO / FPV',
+                        style: TextStyle(
+                          color: Colors.amberAccent,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
                         ),
-                        IconButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        _presetChip(
-                          label: 'Suave (135°/s)',
-                          selected: _acroSettings.preset == AcroRatePreset.smooth,
-                          onTap: () {
-                            setState(() => _acroSettings =
-                                AcroSettings.forPreset(AcroRatePreset.smooth));
-                            setSheetState(() {});
-                          },
-                        ),
-                        _presetChip(
-                          label: 'Padrão (175°/s)',
-                          selected: _acroSettings.preset == AcroRatePreset.standard,
-                          onTap: () {
-                            setState(() => _acroSettings =
-                                AcroSettings.forPreset(AcroRatePreset.standard));
-                            setSheetState(() {});
-                          },
-                        ),
-                        _presetChip(
-                          label: 'Freestyle (310°/s)',
-                          selected:
-                              _acroSettings.preset == AcroRatePreset.freestyle,
-                          onTap: () {
-                            setState(() => _acroSettings =
-                                AcroSettings.forPreset(AcroRatePreset.freestyle));
-                            setSheetState(() {});
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _sliderRow(
-                      label: 'Expo do Stick',
-                      valueText: '${(_acroSettings.expo * 100).round()}%',
-                      value: _acroSettings.expo,
-                      min: 0.0,
-                      max: 0.85,
-                      onChanged: (v) {
-                        setState(() => _acroSettings = _acroSettings.copyWith(expo: v));
-                        setSheetState(() {});
-                      },
-                    ),
-                    _sliderRow(
-                      label: 'Uptilt Câmera FPV',
-                      valueText: '${_acroSettings.fpvUptiltDeg.round()}°',
-                      value: _acroSettings.fpvUptiltDeg,
-                      min: 0.0,
-                      max: 30.0,
-                      onChanged: (v) {
-                        setState(() =>
-                            _acroSettings = _acroSettings.copyWith(fpvUptiltDeg: v));
-                        setSheetState(() {});
-                      },
-                    ),
-                    SwitchListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        'Assistência de Horizonte (estabiliza ao soltar o stick)',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
                       ),
-                      value: _acroSettings.horizonAssist > 0.05,
-                      activeColor: Colors.amberAccent,
-                      onChanged: (enabled) {
-                        setState(() => _acroSettings = _acroSettings.copyWith(
-                              horizonAssist: enabled ? 0.48 : 0.0,
-                            ));
-                        setSheetState(() {});
-                      },
+                      IconButton(
+                        key: const Key('acro_sheet_close_button'),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              _presetChip(
+                                key: const Key('acro_preset_smooth'),
+                                label: 'Suave (135°/s)',
+                                selected:
+                                    _acroSettings.preset == AcroRatePreset.smooth,
+                                onTap: () => applyAcro(
+                                  AcroSettings.forPreset(
+                                    AcroRatePreset.smooth,
+                                    fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
+                                    coordinatedTurn:
+                                        _acroSettings.coordinatedTurn,
+                                  ),
+                                ),
+                              ),
+                              _presetChip(
+                                key: const Key('acro_preset_standard'),
+                                label: 'Padrão (175°/s)',
+                                selected: _acroSettings.preset ==
+                                    AcroRatePreset.standard,
+                                onTap: () => applyAcro(
+                                  AcroSettings.forPreset(
+                                    AcroRatePreset.standard,
+                                    fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
+                                    coordinatedTurn:
+                                        _acroSettings.coordinatedTurn,
+                                  ),
+                                ),
+                              ),
+                              _presetChip(
+                                key: const Key('acro_preset_freestyle'),
+                                label: 'Freestyle (310°/s)',
+                                selected: _acroSettings.preset ==
+                                    AcroRatePreset.freestyle,
+                                onTap: () => applyAcro(
+                                  AcroSettings.forPreset(
+                                    AcroRatePreset.freestyle,
+                                    fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
+                                    coordinatedTurn:
+                                        _acroSettings.coordinatedTurn,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _sliderRow(
+                            sliderKey: const Key('acro_expo_slider'),
+                            label: 'Expo do Stick',
+                            valueText: '${(_acroSettings.expo * 100).round()}%',
+                            value: _acroSettings.expo,
+                            min: 0.0,
+                            max: 0.85,
+                            onChanged: (v) =>
+                                applyAcro(_acroSettings.copyWith(expo: v)),
+                          ),
+                          _sliderRow(
+                            sliderKey: const Key('acro_uptilt_slider'),
+                            label: 'Uptilt Câmera FPV',
+                            valueText: '${_acroSettings.fpvUptiltDeg.round()}°',
+                            value: _acroSettings.fpvUptiltDeg,
+                            min: 0.0,
+                            max: 30.0,
+                            onChanged: (v) => applyAcro(
+                                _acroSettings.copyWith(fpvUptiltDeg: v)),
+                          ),
+                          SwitchListTile(
+                            key: const Key('acro_horizon_switch'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Assistência de Horizonte (estabiliza ao soltar o stick)',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                            value: _acroSettings.horizonAssist > 0.05,
+                            activeColor: Colors.amberAccent,
+                            onChanged: (enabled) => applyAcro(
+                              _acroSettings.copyWith(
+                                horizonAssist: enabled ? 0.48 : 0.0,
+                              ),
+                            ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('acro_coordinated_switch'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Curva Coordenada (Auto-Yaw em curvas)',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                            value: _acroSettings.coordinatedTurn,
+                            activeColor: Colors.amberAccent,
+                            onChanged: (enabled) => applyAcro(
+                              _acroSettings.copyWith(coordinatedTurn: enabled),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           );
@@ -195,11 +258,13 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
   }
 
   Widget _presetChip({
+    Key? key,
     required String label,
     required bool selected,
     required VoidCallback onTap,
   }) {
     return ChoiceChip(
+      key: key,
       label: Text(label, style: const TextStyle(fontSize: 11)),
       selected: selected,
       selectedColor: Colors.amberAccent.withOpacity(0.28),
@@ -208,6 +273,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
   }
 
   Widget _sliderRow({
+    Key? sliderKey,
     required String label,
     required String valueText,
     required double value,
@@ -226,6 +292,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
         ),
         Expanded(
           child: Slider(
+            key: sliderKey,
             value: value.clamp(min, max),
             min: min,
             max: max,

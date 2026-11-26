@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
 
 /// Medalhas de desempenho para corridas cronometradas.
 enum MedalTier { none, bronze, silver, gold }
@@ -271,9 +272,13 @@ class MethodChannelKeyValueStore implements KeyValueStore {
 /// Repositório singleton/injetável de recordes, medalhas e trajetórias Ghost.
 class RecordsRepository {
   static const String storageKey = 'drone_simulator_records_v1';
+  static const String acroSettingsStorageKey =
+      'drone_simulator_acro_settings_v1';
 
   final KeyValueStore _store;
   final Map<String, MapRecord> _records = {};
+  AcroSettings _acroSettings = const AcroSettings();
+  bool _hasSavedAcroSettings = false;
   bool _loaded = false;
 
   RecordsRepository({KeyValueStore? store})
@@ -281,6 +286,8 @@ class RecordsRepository {
 
   bool get isLoaded => _loaded;
   Map<String, MapRecord> get allRecords => Map.unmodifiable(_records);
+  AcroSettings get acroSettings => _acroSettings;
+  bool get hasSavedAcroSettings => _hasSavedAcroSettings;
 
   MapRecord recordFor(String mapId) =>
       _records[mapId] ?? MapRecord(mapId: mapId);
@@ -301,7 +308,28 @@ class RecordsRepository {
         // JSON corrompido não impede o app de iniciar.
       }
     }
+    final rawAcro = await _store.getString(acroSettingsStorageKey);
+    if (rawAcro != null && rawAcro.isNotEmpty) {
+      try {
+        final decodedAcro = jsonDecode(rawAcro);
+        if (decodedAcro is Map<String, dynamic>) {
+          _acroSettings = AcroSettings.fromJson(decodedAcro);
+          _hasSavedAcroSettings = true;
+        }
+      } catch (_) {
+        // JSON corrompido não impede o app de iniciar.
+      }
+    }
     _loaded = true;
+  }
+
+  Future<void> saveAcroSettings(AcroSettings settings) async {
+    _acroSettings = settings;
+    _hasSavedAcroSettings = true;
+    await _store.setString(
+      acroSettingsStorageKey,
+      jsonEncode(settings.toJson()),
+    );
   }
 
   Future<void> _persist() async {

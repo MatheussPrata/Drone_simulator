@@ -277,6 +277,7 @@ class MapSettingsModal extends StatelessWidget {
                     ],
                   ),
                   SwitchListTile(
+                    key: const Key('modal_acro_horizon_switch'),
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text(
@@ -289,6 +290,20 @@ class MapSettingsModal extends StatelessWidget {
                       controller.acroSettings.copyWith(
                         horizonAssist: v ? 0.48 : 0.0,
                       ),
+                    ),
+                  ),
+                  SwitchListTile(
+                    key: const Key('modal_acro_coordinated_switch'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Curva Coordenada no Acro (Auto-Yaw)',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.acroSettings.coordinatedTurn,
+                    activeColor: Colors.amberAccent,
+                    onChanged: (v) => controller.setAcroSettings(
+                      controller.acroSettings.copyWith(coordinatedTurn: v),
                     ),
                   ),
                   SwitchListTile(
@@ -358,6 +373,7 @@ class MapSettingsModal extends StatelessWidget {
   Widget _acroChip(String label, AcroRatePreset preset) {
     final selected = controller.acroSettings.preset == preset;
     return ChoiceChip(
+      key: Key('modal_acro_preset_${preset.name}'),
       label: Text(label, style: const TextStyle(fontSize: 11)),
       selected: selected,
       selectedColor: Colors.amberAccent.withOpacity(0.25),
