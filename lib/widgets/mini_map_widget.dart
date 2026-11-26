@@ -24,6 +24,7 @@ class MiniMapWidget extends StatefulWidget {
   final bool showControls;
   final bool? rotateWithDrone;
   final bool? tacticalDarkMode;
+  final bool offlineVectorMode;
   final double? width;
   final double? height;
   final BorderRadius? borderRadius;
@@ -43,6 +44,7 @@ class MiniMapWidget extends StatefulWidget {
     this.showControls = true,
     this.rotateWithDrone,
     this.tacticalDarkMode,
+    this.offlineVectorMode = false,
     this.width,
     this.height,
     this.borderRadius,
@@ -59,6 +61,8 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
   late bool _followDrone;
   late bool _rotateWithDrone;
   late bool _tacticalDarkMode;
+  bool? _manualOfflineOverride;
+  bool _tileErrorDetected = false;
   String? _lastMapId;
 
   @override
@@ -68,6 +72,9 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
     _followDrone = widget.followDrone;
     _rotateWithDrone = widget.rotateWithDrone ?? !widget.showControls;
     _tacticalDarkMode = widget.tacticalDarkMode ?? !widget.showControls;
+    if (widget.offlineVectorMode) {
+      _manualOfflineOverride = true;
+    }
     widget.controller?.addListener(_onControllerUpdate);
   }
 
@@ -88,6 +95,9 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
     if (oldWidget.tacticalDarkMode != widget.tacticalDarkMode &&
         widget.tacticalDarkMode != null) {
       _tacticalDarkMode = widget.tacticalDarkMode!;
+    }
+    if (oldWidget.offlineVectorMode != widget.offlineVectorMode) {
+      _manualOfflineOverride = widget.offlineVectorMode ? true : null;
     }
   }
 
@@ -170,6 +180,18 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
     );
   }
 
+  Color _offlineBackdropColor(WorldScenario scenario) {
+    if (_tacticalDarkMode) return const Color(0xFF08111B);
+    switch (scenario) {
+      case WorldScenario.urban:
+        return const Color(0xFF1A222C);
+      case WorldScenario.forest:
+        return const Color(0xFF14261B);
+      case WorldScenario.canyon:
+        return const Color(0xFF261E16);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = widget.controller;
@@ -185,6 +207,8 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
     final double mapRotationDeg = _rotateWithDrone ? -radarHeading : 0.0;
     final bool isGeofenceWarning =
         ctrl?.isGeofenceWarning ?? ctrl?.physics.state.isGeofenceWarning ?? false;
+    final bool useOfflineVector =
+        _manualOfflineOverride ?? _tileErrorDetected;
 
     _checkMapChange(activeMap);
 
@@ -193,6 +217,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
 
     final scenario = WorldGenerator.scenarioFor(activeMap);
     final obstacles = WorldGenerator.generateFor(activeMap);
+    final backdropColor = _offlineBackdropColor(scenario);
 
     // ── Geometria do cenário + obstáculos retangulares (prédios, barragem, pilares) ──
     final polygons = <Polygon>[];
@@ -217,7 +242,8 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
         border: const Color(0xBBCBD5E1),
         borderWidth: 1.0,
       ));
-    } else if (scenario == WorldScenario.urban && _tacticalDarkMode) {
+    } else if (scenario == WorldScenario.urban &&
+        (_tacticalDarkMode || useOfflineVector)) {
       polygons.add(_rectPolygon(
         origin: activeMap.center,
         cx: 0,
@@ -236,6 +262,28 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
         depth: 22,
         fill: const Color(0x55334155),
         border: const Color(0x4464748B),
+        borderWidth: 0.6,
+      ));
+    } else if (scenario == WorldScenario.forest &&
+        (_tacticalDarkMode || useOfflineVector)) {
+      polygons.add(_rectPolygon(
+        origin: activeMap.center,
+        cx: 0,
+        cy: 0,
+        width: 14,
+        depth: 960,
+        fill: const Color(0x446D4C41),
+        border: const Color(0x558D6E63),
+        borderWidth: 0.6,
+      ));
+      polygons.add(_rectPolygon(
+        origin: activeMap.center,
+        cx: 0,
+        cy: 0,
+        width: 960,
+        depth: 14,
+        fill: const Color(0x446D4C41),
+        border: const Color(0x558D6E63),
         borderWidth: 0.6,
       ));
     }
@@ -283,8 +331,29 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
       }
     }
 
-    // ── Linhas táticas: rastro, cone de visão e rota para portais ──
+    // ── Linhas táticas: grade offline, rastro, cone de visão e rota para portais ──
     final polylines = <Polyline>[];
+    if (useOfflineVector || _tacticalDarkMode) {
+      final gridColor = Colors.cyanAccent.withOpacity(useOfflineVector ? 0.16 : 0.08);
+      for (var d = -500.0; d <= 500.0; d += 100.0) {
+        polylines.add(Polyline(
+          points: [
+            FlightMap.metersToLatLng(d, -500.0, activeMap.center),
+            FlightMap.metersToLatLng(d, 500.0, activeMap.center),
+          ],
+          color: gridColor,
+          strokeWidth: d == 0.0 ? 1.2 : 0.7,
+        ));
+        polylines.add(Polyline(
+          points: [
+            FlightMap.metersToLatLng(-500.0, d, activeMap.center),
+            FlightMap.metersToLatLng(500.0, d, activeMap.center),
+          ],
+          color: gridColor,
+          strokeWidth: d == 0.0 ? 1.2 : 0.7,
+        ));
+      }
+    }
 
     // Cone de visão frontal (28m à frente, ±26°)
     final yawRad = curYaw * pi / 180.0;
@@ -402,7 +471,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
 
     final Widget mapContent = Stack(
       children: [
-        // ── Camada FlutterMap com Tiles Reais + Radar Tático 3D ──
+        // ── Camada FlutterMap com Tiles Reais + Radar Tático 3D / Fallback Vetorial ──
         FlutterMap(
           mapController: _mapController,
           options: MapOptions(
@@ -411,6 +480,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                 ? widget.initialZoom
                 : max(widget.initialZoom, 16.8),
             initialRotation: mapRotationDeg,
+            backgroundColor: backdropColor,
             cameraConstraint: CameraConstraint.containCenter(
               bounds: activeMap.bounds,
             ),
@@ -425,10 +495,23 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                   ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
                   : 'https://tile.openstreetmap.org/{z}/{y}/{x}.png',
               userAgentPackageName: 'com.dronesim.drone_simulator',
+              errorTileCallback: (_, __, ___) {
+                if (!_tileErrorDetected && mounted) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && !_tileErrorDetected) {
+                      setState(() => _tileErrorDetected = true);
+                    }
+                  });
+                }
+              },
             ),
 
-            // Máscara escura tática para leitura de obstáculos/portais estilo radar
-            if (_tacticalDarkMode)
+            // Fundo vetorial sólido (quando offline/forçado) ou máscara tática escura
+            if (useOfflineVector)
+              IgnorePointer(
+                child: Container(color: backdropColor),
+              )
+            else if (_tacticalDarkMode)
               IgnorePointer(
                 child: Container(color: const Color(0xD808111B)),
               ),
@@ -439,6 +522,24 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
             // 3. Círculos Geofence (500m), No-Fly Zones, obstáculos cilíndricos e portais
             CircleLayer(
               circles: [
+                if (useOfflineVector || _tacticalDarkMode) ...[
+                  CircleMarker(
+                    point: activeMap.center,
+                    radius: 100.0,
+                    useRadiusInMeter: true,
+                    color: Colors.transparent,
+                    borderColor: Colors.cyanAccent.withOpacity(0.18),
+                    borderStrokeWidth: 0.9,
+                  ),
+                  CircleMarker(
+                    point: activeMap.center,
+                    radius: 250.0,
+                    useRadiusInMeter: true,
+                    color: Colors.transparent,
+                    borderColor: Colors.cyanAccent.withOpacity(0.20),
+                    borderStrokeWidth: 0.9,
+                  ),
+                ],
                 CircleMarker(
                   point: activeMap.center,
                   radius: activeMap.radiusMeters,
@@ -586,6 +687,37 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
           ],
         ),
 
+        if (widget.showControls && useOfflineVector)
+          Positioned(
+            top: 75,
+            left: 12,
+            child: Container(
+              key: const Key('badge_offline_vector'),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.78),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.65)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.grid_on, color: Colors.cyanAccent, size: 12),
+                  SizedBox(width: 4),
+                  Text(
+                    'VETORIAL OFFLINE',
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
         // ── Controles Flutuantes do Mapa (quando em tela cheia) ──
         if (widget.showControls)
           Positioned(
@@ -605,7 +737,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     icon: Icon(
                       _isSatellite ? Icons.satellite_alt : Icons.map,
                       color: Colors.cyanAccent,
-                      size: 20,
+                      size: 19,
                     ),
                     tooltip: _isSatellite
                         ? 'Mudar para Mapa de Ruas'
@@ -618,7 +750,25 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
+                  ),
+                  IconButton(
+                    key: const Key('btn_toggle_offline_vector'),
+                    icon: Icon(
+                      useOfflineVector ? Icons.grid_on : Icons.grid_off,
+                      color:
+                          useOfflineVector ? Colors.cyanAccent : Colors.white60,
+                      size: 19,
+                    ),
+                    tooltip: 'Alternar Mapa Vetorial Offline',
+                    onPressed: () {
+                      setState(() {
+                        _manualOfflineOverride = !useOfflineVector;
+                      });
+                    },
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
                   IconButton(
                     icon: Icon(
@@ -626,7 +776,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                       color: _tacticalDarkMode
                           ? Colors.cyanAccent
                           : Colors.white60,
-                      size: 20,
+                      size: 19,
                     ),
                     tooltip: _tacticalDarkMode
                         ? 'Desativar Radar Escuro'
@@ -636,7 +786,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
                   IconButton(
                     icon: Icon(
@@ -644,7 +794,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                       color: _rotateWithDrone
                           ? Colors.amberAccent
                           : Colors.white60,
-                      size: 20,
+                      size: 19,
                     ),
                     tooltip: _rotateWithDrone
                         ? 'Orientação: Proa para cima'
@@ -661,14 +811,14 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
-                  const Divider(color: Colors.white24, height: 8),
+                  const Divider(color: Colors.white24, height: 6),
                   IconButton(
                     icon: Icon(
                       _followDrone ? Icons.gps_fixed : Icons.gps_not_fixed,
                       color: _followDrone ? Colors.greenAccent : Colors.white60,
-                      size: 20,
+                      size: 19,
                     ),
                     tooltip:
                         _followDrone ? 'Câmera seguindo drone' : 'Seguir drone',
@@ -683,11 +833,11 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
-                  const Divider(color: Colors.white24, height: 8),
+                  const Divider(color: Colors.white24, height: 6),
                   IconButton(
-                    icon: const Icon(Icons.add, color: Colors.white, size: 20),
+                    icon: const Icon(Icons.add, color: Colors.white, size: 19),
                     tooltip: 'Aproximar',
                     onPressed: () {
                       _safeMove(
@@ -698,11 +848,11 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
                   IconButton(
                     icon:
-                        const Icon(Icons.remove, color: Colors.white, size: 20),
+                        const Icon(Icons.remove, color: Colors.white, size: 19),
                     tooltip: 'Afastar',
                     onPressed: () {
                       _safeMove(
@@ -713,7 +863,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     },
                     padding: EdgeInsets.zero,
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        const BoxConstraints(minWidth: 34, minHeight: 32),
                   ),
                 ],
               ),

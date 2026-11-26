@@ -41,6 +41,18 @@ class VirtualJoystick extends StatefulWidget {
   /// Opacidade do widget do joystick (0.0 a 1.0) para sobreposição translúcida
   final double opacity;
 
+  /// Se `true`, o eixo vertical (Y) retorna ao centro ao soltar; se `false`, mantém o throttle.
+  final bool autoCenterY;
+
+  /// Se `true`, permite tocar em qualquer ponto da zona lateral e centralizar o stick ali.
+  final bool floating;
+
+  /// Largura da área de toque quando [floating] é `true`.
+  final double floatingWidth;
+
+  /// Altura da área de toque quando [floating] é `true`.
+  final double floatingHeight;
+
   const VirtualJoystick({
     super.key,
     this.radius = 60.0,
@@ -53,6 +65,10 @@ class VirtualJoystick extends StatefulWidget {
     this.innerColor = const Color(0xFF00E5FF),
     this.label,
     this.opacity = 1.0,
+    this.autoCenterY = true,
+    this.floating = false,
+    this.floatingWidth = 210.0,
+    this.floatingHeight = 142.0,
   });
 
   @override
@@ -61,12 +77,76 @@ class VirtualJoystick extends StatefulWidget {
 
 class _VirtualJoystickState extends State<VirtualJoystick> {
   Offset _stickPosition = Offset.zero;
+  Offset? _dynamicOrigin;
+
+  double get _maxDistance => max(1.0, widget.radius - widget.stickRadius);
+
+  Offset get _restCenter {
+    if (!widget.floating) {
+      return Offset(widget.radius, widget.radius);
+    }
+    return Offset(widget.floatingWidth / 2, widget.floatingHeight / 2);
+  }
+
+  @override
+  void didUpdateWidget(VirtualJoystick oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.autoCenterY && widget.autoCenterY) {
+      _stickPosition = Offset.zero;
+      _dynamicOrigin = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _emitNormalized(Offset.zero);
+        }
+      });
+    }
+  }
+
+  void _emitNormalized(Offset normalized) {
+    widget.onPositionChanged?.call(normalized);
+    widget.onChanged?.call(normalized);
+    widget.onChange?.call(normalized.dx, normalized.dy);
+  }
+
+  void _handlePanStart(Offset localPosition) {
+    if (!widget.floating) {
+      _updatePosition(localPosition);
+      return;
+    }
+
+    final minX = widget.radius;
+    final maxX = max(minX, widget.floatingWidth - widget.radius);
+    final minY = widget.radius;
+    final maxY = max(minY, widget.floatingHeight - widget.radius);
+
+    final clampedOrigin = Offset(
+      localPosition.dx.clamp(minX, maxX),
+      localPosition.dy.clamp(minY, maxY),
+    );
+
+    if (!widget.autoCenterY) {
+      final newOrigin = Offset(
+        clampedOrigin.dx,
+        (clampedOrigin.dy - _stickPosition.dy).clamp(minY, maxY),
+      );
+      setState(() {
+        _dynamicOrigin = newOrigin;
+      });
+      _updatePosition(localPosition);
+    } else {
+      setState(() {
+        _dynamicOrigin = clampedOrigin;
+        _stickPosition = Offset.zero;
+      });
+      _emitNormalized(Offset.zero);
+    }
+  }
 
   void _updatePosition(Offset localPosition) {
-    final center = Offset(widget.radius, widget.radius);
+    final center = widget.floating ? (_dynamicOrigin ?? _restCenter) : _restCenter;
     final delta = localPosition - center;
     final distance = delta.distance;
-    final maxDistance = max(1.0, widget.radius - widget.stickRadius);
+    final maxDistance = _maxDistance;
 
     Offset clampedDelta;
     if (distance > maxDistance) {
@@ -87,23 +167,32 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
       _stickPosition = clampedDelta;
     });
 
-    widget.onPositionChanged?.call(normalized);
-    widget.onChanged?.call(normalized);
-    widget.onChange?.call(normalized.dx, normalized.dy);
+    _emitNormalized(normalized);
   }
 
   void _resetPosition() {
+    final maxDistance = _maxDistance;
+    final nextStick =
+        widget.autoCenterY ? Offset.zero : Offset(0.0, _stickPosition.dy);
+    final normalized = widget.autoCenterY
+        ? Offset.zero
+        : Offset(0.0, (nextStick.dy / maxDistance).clamp(-1.0, 1.0));
+
     setState(() {
-      _stickPosition = Offset.zero;
+      _stickPosition = nextStick;
+      _dynamicOrigin = null;
     });
-    widget.onPositionChanged?.call(Offset.zero);
-    widget.onChanged?.call(Offset.zero);
-    widget.onChange?.call(0.0, 0.0);
+    _emitNormalized(normalized);
   }
 
   @override
   Widget build(BuildContext context) {
     final diameter = widget.radius * 2;
+    final canvasSize = widget.floating
+        ? Size(widget.floatingWidth, widget.floatingHeight)
+        : Size(diameter, diameter);
+    final activeCenter =
+        widget.floating ? (_dynamicOrigin ?? _restCenter) : _restCenter;
 
     final content = Column(
       mainAxisSize: MainAxisSize.min,
@@ -130,19 +219,23 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
         ],
         GestureDetector(
           key: const Key('virtual_joystick_gesture'),
-          onPanStart: (details) => _updatePosition(details.localPosition),
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (details) => _handlePanStart(details.localPosition),
           onPanUpdate: (details) => _updatePosition(details.localPosition),
           onPanEnd: (_) => _resetPosition(),
           onPanCancel: _resetPosition,
           child: CustomPaint(
-            size: Size(diameter, diameter),
+            size: canvasSize,
             painter: _JoystickPainter(
               radius: widget.radius,
               stickRadius: widget.stickRadius,
+              baseCenter: activeCenter,
               stickOffset: _stickPosition,
               outerColor: widget.outerColor,
               borderColor: widget.borderColor,
               innerColor: widget.innerColor,
+              holdVerticalAxis: !widget.autoCenterY,
+              isFloatingArea: widget.floating,
             ),
           ),
         ),
@@ -163,23 +256,43 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
 class _JoystickPainter extends CustomPainter {
   final double radius;
   final double stickRadius;
+  final Offset baseCenter;
   final Offset stickOffset;
   final Color outerColor;
   final Color borderColor;
   final Color innerColor;
+  final bool holdVerticalAxis;
+  final bool isFloatingArea;
 
   _JoystickPainter({
     required this.radius,
     required this.stickRadius,
+    required this.baseCenter,
     required this.stickOffset,
     required this.outerColor,
     required this.borderColor,
     required this.innerColor,
+    this.holdVerticalAxis = false,
+    this.isFloatingArea = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
+    final center = baseCenter;
+
+    if (isFloatingArea) {
+      final zonePaint = Paint()
+        ..color = borderColor.withOpacity(0.14)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),
+          const Radius.circular(18),
+        ),
+        zonePaint,
+      );
+    }
 
     // 1. Círculo externo (Base de apoio)
     final outerPaint = Paint()
@@ -189,7 +302,7 @@ class _JoystickPainter extends CustomPainter {
 
     // Borda do círculo externo
     final borderPaint = Paint()
-      ..color = borderColor
+      ..color = holdVerticalAxis ? Colors.amberAccent.withOpacity(0.75) : borderColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
     canvas.drawCircle(center, radius, borderPaint);
@@ -209,6 +322,18 @@ class _JoystickPainter extends CustomPainter {
       guidePaint,
     );
 
+    if (holdVerticalAxis) {
+      final holdLinePaint = Paint()
+        ..color = Colors.amberAccent.withOpacity(0.65)
+        ..strokeWidth = 1.6;
+      final holdY = center.dy + stickOffset.dy;
+      canvas.drawLine(
+        Offset(center.dx - radius * 0.55, holdY),
+        Offset(center.dx + radius * 0.55, holdY),
+        holdLinePaint,
+      );
+    }
+
     // 2. Bolinha interna (Knob móvel)
     final knobCenter = center + stickOffset;
 
@@ -219,11 +344,12 @@ class _JoystickPainter extends CustomPainter {
     canvas.drawCircle(knobCenter + const Offset(1, 2), stickRadius, shadowPaint);
 
     // Gradiente radial da bolinha
+    final knobColor = holdVerticalAxis ? Colors.amberAccent : innerColor;
     final knobPaint = Paint()
       ..shader = RadialGradient(
         colors: [
-          innerColor,
-          Color.lerp(innerColor, Colors.black, 0.35) ?? innerColor,
+          knobColor,
+          Color.lerp(knobColor, Colors.black, 0.35) ?? knobColor,
         ],
       ).createShader(Rect.fromCircle(center: knobCenter, radius: stickRadius));
     canvas.drawCircle(knobCenter, stickRadius, knobPaint);
@@ -249,10 +375,13 @@ class _JoystickPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _JoystickPainter oldDelegate) {
     return oldDelegate.stickOffset != stickOffset ||
+        oldDelegate.baseCenter != baseCenter ||
         oldDelegate.radius != radius ||
         oldDelegate.stickRadius != stickRadius ||
         oldDelegate.outerColor != outerColor ||
         oldDelegate.borderColor != borderColor ||
-        oldDelegate.innerColor != innerColor;
+        oldDelegate.innerColor != innerColor ||
+        oldDelegate.holdVerticalAxis != holdVerticalAxis ||
+        oldDelegate.isFloatingArea != isFloatingArea;
   }
 }

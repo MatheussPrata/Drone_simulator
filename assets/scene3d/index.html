@@ -93,21 +93,43 @@
         isCrashed: false,
         crashImpactSpeedKmh: 0.0,
         isArmed: false,
-        status: 'landed'
+        status: 'landed',
+        groundHeightM: 0.0
       };
 
       var currentScenario = 'urban';
       var currentTheme = { sky: '#8cb5df', fogDensity: 0.0015, ground: '#ffffff', water: false };
       var currentLightingPreset = 'day';
 
-      // ── Sintetizador Web Audio Offline (motores + efeitos de jogo) ──
+      // ── Sintetizador Web Audio Offline (motores + hélices + vento + efeitos de jogo) ──
       var AudioEngine = (function () {
         var ctx = null;
         var masterGain = null;
         var motorGain = null;
         var oscMain = null;
         var oscSub = null;
+        var propNoiseSource = null;
+        var propNoiseFilter = null;
+        var propNoiseGain = null;
+        var windSource = null;
+        var windFilter = null;
+        var windGain = null;
         var initialized = false;
+
+        function createNoiseBuffer(audioCtx) {
+          var len = audioCtx.sampleRate * 2;
+          var buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+          var data = buf.getChannelData(0);
+          var b0 = 0.0, b1 = 0.0, b2 = 0.0;
+          for (var i = 0; i < len; i++) {
+            var white = Math.random() * 2 - 1;
+            b0 = 0.99765 * b0 + white * 0.0990460;
+            b1 = 0.96300 * b1 + white * 0.2965164;
+            b2 = 0.57000 * b2 + white * 1.0526913;
+            data[i] = (b0 + b1 + b2 + white * 0.1848) * 0.14;
+          }
+          return buf;
+        }
 
         function ensureInit() {
           if (initialized) return true;
@@ -143,6 +165,35 @@
             subGain.connect(motorGain);
             oscSub.start();
 
+            var noiseBuf = createNoiseBuffer(ctx);
+
+            propNoiseSource = ctx.createBufferSource();
+            propNoiseSource.buffer = noiseBuf;
+            propNoiseSource.loop = true;
+            propNoiseFilter = ctx.createBiquadFilter();
+            propNoiseFilter.type = 'bandpass';
+            propNoiseFilter.frequency.value = 480;
+            propNoiseFilter.Q.value = 1.4;
+            propNoiseGain = ctx.createGain();
+            propNoiseGain.gain.value = 0.0;
+            propNoiseSource.connect(propNoiseFilter);
+            propNoiseFilter.connect(propNoiseGain);
+            propNoiseGain.connect(masterGain);
+            propNoiseSource.start();
+
+            windSource = ctx.createBufferSource();
+            windSource.buffer = noiseBuf;
+            windSource.loop = true;
+            windFilter = ctx.createBiquadFilter();
+            windFilter.type = 'lowpass';
+            windFilter.frequency.value = 650;
+            windGain = ctx.createGain();
+            windGain.gain.value = 0.0;
+            windSource.connect(windFilter);
+            windFilter.connect(windGain);
+            windGain.connect(masterGain);
+            windSource.start();
+
             initialized = true;
             return true;
           } catch (e) {
@@ -157,10 +208,12 @@
           }
         }
 
-        function updateMotors(motors, isArmed, isCrashed, enabled) {
+        function updateMotors(motors, isArmed, isCrashed, enabled, speedKmh) {
           if (!enabled || !isArmed || isCrashed) {
-            if (motorGain && ctx) {
-              motorGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.06);
+            if (ctx) {
+              if (motorGain) motorGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.06);
+              if (propNoiseGain) propNoiseGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.06);
+              if (windGain) windGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.08);
             }
             return;
           }
@@ -174,6 +227,17 @@
           oscMain.frequency.setTargetAtTime(freq, ctx.currentTime, 0.04);
           oscSub.frequency.setTargetAtTime(freq * 1.98, ctx.currentTime, 0.04);
           motorGain.gain.setTargetAtTime(vol, ctx.currentTime, 0.05);
+
+          if (propNoiseFilter && propNoiseGain) {
+            propNoiseFilter.frequency.setTargetAtTime(320 + avg * 1150 + spread * 240, ctx.currentTime, 0.05);
+            propNoiseGain.gain.setTargetAtTime(avg * avg * 0.16, ctx.currentTime, 0.05);
+          }
+          if (windGain && windFilter) {
+            var spd = Number(speedKmh) || 0;
+            var windVol = spd > 18 ? Math.min(0.10, ((spd - 18) / 90.0) * 0.10) : 0.0;
+            windFilter.frequency.setTargetAtTime(420 + Math.min(1200, spd * 11), ctx.currentTime, 0.08);
+            windGain.gain.setTargetAtTime(windVol, ctx.currentTime, 0.08);
+          }
         }
 
         function playTone(freq, duration, type, gainVal, slideTo) {
@@ -1235,6 +1299,9 @@
         if (typeof data.crashImpactSpeedKmh === 'number') {
           droneState.crashImpactSpeedKmh = data.crashImpactSpeedKmh;
         }
+        if (typeof data.groundHeightM === 'number') {
+          droneState.groundHeightM = data.groundHeightM;
+        }
         var wasCrashed = droneState.isCrashed;
         if (typeof data.isCrashed === 'boolean') droneState.isCrashed = data.isCrashed;
         if (Array.isArray(data.motors) && data.motors.length >= 4) {
@@ -1249,7 +1316,8 @@
           droneState.motors,
           droneState.isArmed,
           droneState.isCrashed,
-          droneState.audioEnabled
+          droneState.audioEnabled,
+          droneState.speedKmh
         );
 
         if (!wasCrashed && droneState.isCrashed) {
@@ -1683,6 +1751,7 @@
 
         updateCrashParticles(frameDt);
         updateGuideArrow();
+        updateLandingMarker();
         if (raceModeOn && raceGroup.children.length > 0) {
           var pulse = 1.0 + 0.06 * Math.sin(performance.now() / 180.0);
           var pulseTarget = raceActiveGateGroup || raceGroup.children[0];
@@ -1695,6 +1764,76 @@
         updateCameraFrame(frameDt);
         renderer.render(scene, camera);
       }
+
+      // ── Marcador de projeção no solo / telhado para auxílio de pouso em 3ª pessoa ──
+      var landingMarkerGroup = new THREE.Group();
+      var landingShadowMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true,
+        opacity: 0.38,
+        depthWrite: false
+      });
+      var landingShadowMesh = new THREE.Mesh(
+        new THREE.CircleGeometry(0.95, 28),
+        landingShadowMat
+      );
+      landingShadowMesh.rotation.x = -Math.PI / 2;
+      landingMarkerGroup.add(landingShadowMesh);
+
+      var landingRingMat = new THREE.MeshBasicMaterial({
+        color: 0x00e5ff,
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      var landingRingMesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.75, 0.94, 32),
+        landingRingMat
+      );
+      landingRingMesh.rotation.x = -Math.PI / 2;
+      landingRingMesh.position.y = 0.01;
+      landingMarkerGroup.add(landingRingMesh);
+
+      var landingBeamGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 1, 0)
+      ]);
+      var landingBeamMat = new THREE.LineBasicMaterial({
+        color: 0x00e5ff,
+        transparent: true,
+        opacity: 0.30
+      });
+      var landingBeam = new THREE.Line(landingBeamGeo, landingBeamMat);
+      landingMarkerGroup.add(landingBeam);
+      landingMarkerGroup.visible = false;
+      scene.add(landingMarkerGroup);
+
+      function updateLandingMarker() {
+        var visible = cameraTransition > 0.15 && !droneState.isCrashed;
+        landingMarkerGroup.visible = visible;
+        if (!visible) return;
+
+        var gh = Number(droneState.groundHeightM) || 0.0;
+        var agl = Math.max(0.0, (Number(droneState.z) || 0.0) - gh);
+        landingMarkerGroup.position.set(droneState.x, gh + 0.06, -droneState.y);
+
+        var inTouchdownZone = agl <= 2.5;
+        landingRingMat.color.setHex(inTouchdownZone ? 0x33ff99 : 0x00e5ff);
+        landingBeamMat.color.setHex(inTouchdownZone ? 0x33ff99 : 0x00e5ff);
+
+        var ringScale = 0.85 + Math.min(0.65, agl * 0.03);
+        landingRingMesh.scale.setScalar(ringScale);
+        landingShadowMesh.scale.setScalar(Math.max(0.55, 1.0 - agl * 0.015));
+        landingShadowMat.opacity = Math.max(0.12, 0.42 - agl * 0.008);
+        landingRingMat.opacity = Math.max(0.30, 0.85 - agl * 0.012);
+
+        landingBeam.visible = agl > 0.25 && agl < 40.0;
+        if (landingBeam.visible) {
+          landingBeam.scale.set(1, agl, 1);
+        }
+      }
+
       animate();
 
       // ── Redimensionamento Responsivo ──

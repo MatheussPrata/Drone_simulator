@@ -51,6 +51,14 @@ class FpvOsdMath {
     if (h < 292.5) return 'O';
     return 'NO';
   }
+
+  /// Calcula o pitch efetivo da câmera FPV considerando atitude, gimbal e uptilt FPV.
+  static double effectiveCameraPitchDeg({
+    required double visualPitchDeg,
+    required double gimbalPitchDeg,
+    double fpvUptiltDeg = 0.0,
+  }) =>
+      visualPitchDeg + gimbalPitchDeg + fpvUptiltDeg;
 }
 
 /// Widget de Retícula de Voo e OSD estilo DJI / FPV.
@@ -67,6 +75,13 @@ class FpvOsdOverlay extends StatefulWidget {
   final double visualPitch;
   final double visualRoll;
   final double gimbalPitch;
+  final double fpvUptiltDeg;
+  final double? verticalSpeedMs;
+  final double? altitudeAgl;
+  final double? nextGateX;
+  final double? nextGateY;
+  final double? nextGateZ;
+  final int? nextGateNumber;
   final double droneX;
   final double droneY;
   final double droneZ;
@@ -84,6 +99,13 @@ class FpvOsdOverlay extends StatefulWidget {
     this.visualPitch = 0.0,
     this.visualRoll = 0.0,
     this.gimbalPitch = 0.0,
+    this.fpvUptiltDeg = 0.0,
+    this.verticalSpeedMs,
+    this.altitudeAgl,
+    this.nextGateX,
+    this.nextGateY,
+    this.nextGateZ,
+    this.nextGateNumber,
     this.droneX = 0.0,
     this.droneY = 0.0,
     this.droneZ = 0.0,
@@ -133,6 +155,14 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
     final curPitch = ctrl != null ? ctrl.visualPitch : widget.visualPitch;
     final curRoll = ctrl != null ? ctrl.visualRoll : widget.visualRoll;
     final curGimbal = ctrl != null ? ctrl.gimbalPitch : widget.gimbalPitch;
+    final curUptilt = ctrl != null
+        ? (ctrl.flightMode == FlightControlMode.acro ? ctrl.fpvUptiltDeg : 0.0)
+        : widget.fpvUptiltDeg;
+    final curVerticalSpeed =
+        ctrl != null ? ctrl.state.verticalSpeedMs : widget.verticalSpeedMs;
+    final curAgl = ctrl != null ? ctrl.altitudeAgl : widget.altitudeAgl;
+    final activeGate =
+        (ctrl != null && ctrl.isRaceMode) ? ctrl.raceManager?.activeGate : null;
     final curX = ctrl != null ? ctrl.x : widget.droneX;
     final curY = ctrl != null ? ctrl.y : widget.droneY;
     final curZ = ctrl != null ? ctrl.z : widget.droneZ;
@@ -148,6 +178,14 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
           visualPitch: curPitch,
           visualRoll: curRoll,
           gimbalPitch: curGimbal,
+          fpvUptiltDeg: curUptilt,
+          verticalSpeedMs: curVerticalSpeed,
+          altitudeAgl: curAgl,
+          nextGateX: activeGate?.x ?? widget.nextGateX,
+          nextGateY: activeGate?.y ?? widget.nextGateY,
+          nextGateZ: activeGate?.z ?? widget.nextGateZ,
+          nextGateNumber:
+              activeGate != null ? (ctrl!.raceGateIndex + 1) : widget.nextGateNumber,
           droneX: curX,
           droneY: curY,
           droneZ: curZ,
@@ -168,6 +206,13 @@ class FpvOsdPainter extends CustomPainter {
   final double visualPitch;
   final double visualRoll;
   final double gimbalPitch;
+  final double fpvUptiltDeg;
+  final double? verticalSpeedMs;
+  final double? altitudeAgl;
+  final double? nextGateX;
+  final double? nextGateY;
+  final double? nextGateZ;
+  final int? nextGateNumber;
   final double droneX;
   final double droneY;
   final double droneZ;
@@ -182,6 +227,13 @@ class FpvOsdPainter extends CustomPainter {
     required this.visualPitch,
     required this.visualRoll,
     required this.gimbalPitch,
+    this.fpvUptiltDeg = 0.0,
+    this.verticalSpeedMs,
+    this.altitudeAgl,
+    this.nextGateX,
+    this.nextGateY,
+    this.nextGateZ,
+    this.nextGateNumber,
     required this.droneX,
     required this.droneY,
     required this.droneZ,
@@ -225,6 +277,11 @@ class FpvOsdPainter extends CustomPainter {
     // ── 3. Marcador H Flutuante (Aponta sempre para a origem 0,0) ──
     if (showHomeMarker) {
       _drawFloatingHomeMarker(canvas, size, cx, cy, distToHome, homeRelativeAngle);
+    }
+
+    // ── 4. Seta lateral para próximo portal quando fora do campo de visão ──
+    if (nextGateX != null && nextGateY != null) {
+      _drawNextGateEdgeMarker(canvas, size, cy);
     }
   }
 
@@ -429,8 +486,13 @@ class FpvOsdPainter extends CustomPainter {
     final focalLength = cy / tan(halfFovRad);
 
     final pitchSteps = [-30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0];
+    final effectivePitch = FpvOsdMath.effectiveCameraPitchDeg(
+      visualPitchDeg: visualPitch,
+      gimbalPitchDeg: gimbalPitch,
+      fpvUptiltDeg: fpvUptiltDeg,
+    );
     for (final deg in pitchSteps) {
-      final totalPitch = (deg + visualPitch + gimbalPitch) * pi / 180.0;
+      final totalPitch = (deg + effectivePitch) * pi / 180.0;
       final yOffset = focalLength * tan(totalPitch);
 
       if (yOffset.abs() > cy * 0.85) continue;
@@ -480,6 +542,27 @@ class FpvOsdPainter extends CustomPainter {
     }
 
     canvas.restore();
+
+    if (altitudeAgl != null || verticalSpeedMs != null) {
+      final parts = <String>[
+        if (altitudeAgl != null) 'AGL ${altitudeAgl!.toStringAsFixed(1)}m',
+        if (verticalSpeedMs != null)
+          'V/S ${verticalSpeedMs! >= 0 ? '+' : ''}${verticalSpeedMs!.toStringAsFixed(1)}',
+      ];
+      final tpStats = TextPainter(
+        text: TextSpan(
+          text: parts.join(' · '),
+          style: const TextStyle(
+            color: Color(0xCC00E5FF),
+            fontSize: 9.0,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'monospace',
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tpStats.paint(canvas, Offset(cx - tpStats.width / 2.0, cy + 16.0));
+    }
   }
 
   /// Desenha o marcador H flutuante que aponta com precisão para a origem Home (0,0)
@@ -513,7 +596,12 @@ class FpvOsdPainter extends CustomPainter {
       // Posicionamento vertical dinâmico próximo ao horizonte
       const halfFovRad = 30.0 * pi / 180.0;
       final focalLength = cy / tan(halfFovRad);
-      final horizonY = cy + focalLength * tan((visualPitch + gimbalPitch) * pi / 180.0);
+      final effectivePitch = FpvOsdMath.effectiveCameraPitchDeg(
+        visualPitchDeg: visualPitch,
+        gimbalPitchDeg: gimbalPitch,
+        fpvUptiltDeg: fpvUptiltDeg,
+      );
+      final horizonY = cy + focalLength * tan(effectivePitch * pi / 180.0);
       final screenY = horizonY.clamp(cy - 120.0, cy + 120.0);
 
       // Ícone flutuante Home [H]
@@ -599,12 +687,89 @@ class FpvOsdPainter extends CustomPainter {
     }
   }
 
+  void _drawNextGateEdgeMarker(Canvas canvas, Size size, double cy) {
+    final gx = nextGateX!;
+    final gy = nextGateY!;
+    final gz = nextGateZ ?? droneZ;
+    final bearing = FpvOsdMath.calculateHomeBearing(
+      droneX: droneX,
+      droneY: droneY,
+      homeX: gx,
+      homeY: gy,
+    );
+    final relAngle = FpvOsdMath.calculateRelativeAngle(
+      targetBearing: bearing,
+      currentYaw: yaw,
+    );
+    if (relAngle.abs() <= 37.5) return;
+
+    final dist = sqrt(pow(gx - droneX, 2) + pow(gy - droneY, 2) + pow(gz - droneZ, 2));
+    final isRight = relAngle > 0;
+    final edgeX = isRight ? (size.width - 34.0) : 34.0;
+    final edgeY = cy - 34.0;
+
+    final gateGlowPaint = Paint()
+      ..color = const Color(0xFF00E5FF)
+      ..style = PaintingStyle.fill;
+    final arrowPath = Path();
+    if (isRight) {
+      arrowPath.moveTo(edgeX + 10, edgeY);
+      arrowPath.lineTo(edgeX, edgeY - 7);
+      arrowPath.lineTo(edgeX, edgeY + 7);
+    } else {
+      arrowPath.moveTo(edgeX - 10, edgeY);
+      arrowPath.lineTo(edgeX, edgeY - 7);
+      arrowPath.lineTo(edgeX, edgeY + 7);
+    }
+    arrowPath.close();
+    canvas.drawPath(arrowPath, gateGlowPaint);
+
+    final label = 'G${nextGateNumber ?? ''} ${dist.toStringAsFixed(0)}m';
+    final tp = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          color: Color(0xFF00E5FF),
+          fontSize: 8.5,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'monospace',
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final box = Rect.fromCenter(
+      center: Offset(isRight ? edgeX - 24 : edgeX + 24, edgeY),
+      width: max(40.0, tp.width + 10),
+      height: 20,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(box, const Radius.circular(4)),
+      Paint()..color = Colors.black.withOpacity(0.82),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(box, const Radius.circular(4)),
+      Paint()
+        ..color = const Color(0xFF00E5FF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+    tp.paint(canvas, Offset(box.center.dx - tp.width / 2.0, box.center.dy - tp.height / 2.0));
+  }
+
   @override
   bool shouldRepaint(covariant FpvOsdPainter oldDelegate) {
     return oldDelegate.yaw != yaw ||
         oldDelegate.visualPitch != visualPitch ||
         oldDelegate.visualRoll != visualRoll ||
         oldDelegate.gimbalPitch != gimbalPitch ||
+        oldDelegate.fpvUptiltDeg != fpvUptiltDeg ||
+        oldDelegate.verticalSpeedMs != verticalSpeedMs ||
+        oldDelegate.altitudeAgl != altitudeAgl ||
+        oldDelegate.nextGateX != nextGateX ||
+        oldDelegate.nextGateY != nextGateY ||
+        oldDelegate.nextGateZ != nextGateZ ||
+        oldDelegate.nextGateNumber != nextGateNumber ||
         oldDelegate.droneX != droneX ||
         oldDelegate.droneY != droneY ||
         oldDelegate.droneZ != droneZ ||

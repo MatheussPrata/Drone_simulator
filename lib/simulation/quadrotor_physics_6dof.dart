@@ -25,6 +25,8 @@ class AcroSettings {
   final double horizonAssist;
   final double fpvUptiltDeg;
   final bool coordinatedTurn;
+  final bool floatingJoysticks;
+  final bool manualAcroThrottle;
 
   const AcroSettings({
     this.preset = AcroRatePreset.standard,
@@ -33,6 +35,8 @@ class AcroSettings {
     this.horizonAssist = 0.48,
     this.fpvUptiltDeg = 10.0,
     this.coordinatedTurn = true,
+    this.floatingJoysticks = false,
+    this.manualAcroThrottle = false,
   });
 
   factory AcroSettings.forPreset(
@@ -41,6 +45,8 @@ class AcroSettings {
     double? horizonAssist,
     double? fpvUptiltDeg,
     bool? coordinatedTurn,
+    bool? floatingJoysticks,
+    bool? manualAcroThrottle,
   }) {
     final defaultRate = switch (preset) {
       AcroRatePreset.smooth => 135.0,
@@ -64,6 +70,8 @@ class AcroSettings {
       horizonAssist: horizonAssist ?? defaultAssist,
       fpvUptiltDeg: fpvUptiltDeg ?? defaultUptilt,
       coordinatedTurn: coordinatedTurn ?? true,
+      floatingJoysticks: floatingJoysticks ?? false,
+      manualAcroThrottle: manualAcroThrottle ?? false,
     );
   }
 
@@ -74,6 +82,8 @@ class AcroSettings {
     double? horizonAssist,
     double? fpvUptiltDeg,
     bool? coordinatedTurn,
+    bool? floatingJoysticks,
+    bool? manualAcroThrottle,
   }) {
     return AcroSettings(
       preset: preset ?? this.preset,
@@ -82,6 +92,8 @@ class AcroSettings {
       horizonAssist: horizonAssist ?? this.horizonAssist,
       fpvUptiltDeg: fpvUptiltDeg ?? this.fpvUptiltDeg,
       coordinatedTurn: coordinatedTurn ?? this.coordinatedTurn,
+      floatingJoysticks: floatingJoysticks ?? this.floatingJoysticks,
+      manualAcroThrottle: manualAcroThrottle ?? this.manualAcroThrottle,
     );
   }
 
@@ -92,6 +104,8 @@ class AcroSettings {
         'horizonAssist': horizonAssist,
         'fpvUptiltDeg': fpvUptiltDeg,
         'coordinatedTurn': coordinatedTurn,
+        'floatingJoysticks': floatingJoysticks,
+        'manualAcroThrottle': manualAcroThrottle,
       };
 
   factory AcroSettings.fromJson(Map<String, dynamic> json) {
@@ -111,6 +125,8 @@ class AcroSettings {
       fpvUptiltDeg:
           (json['fpvUptiltDeg'] as num?)?.toDouble().clamp(0.0, 30.0) ?? 10.0,
       coordinatedTurn: (json['coordinatedTurn'] as bool?) ?? true,
+      floatingJoysticks: (json['floatingJoysticks'] as bool?) ?? false,
+      manualAcroThrottle: (json['manualAcroThrottle'] as bool?) ?? false,
     );
   }
 
@@ -124,7 +140,9 @@ class AcroSettings {
           expo == other.expo &&
           horizonAssist == other.horizonAssist &&
           fpvUptiltDeg == other.fpvUptiltDeg &&
-          coordinatedTurn == other.coordinatedTurn;
+          coordinatedTurn == other.coordinatedTurn &&
+          floatingJoysticks == other.floatingJoysticks &&
+          manualAcroThrottle == other.manualAcroThrottle;
 
   @override
   int get hashCode => Object.hash(
@@ -134,6 +152,8 @@ class AcroSettings {
         horizonAssist,
         fpvUptiltDeg,
         coordinatedTurn,
+        floatingJoysticks,
+        manualAcroThrottle,
       );
 }
 
@@ -952,7 +972,12 @@ class QuadrotorPhysicsEngine {
                 math.max(1.0, effectiveMaxThrust))
             .clamp(0.15, 0.72);
 
-        if (stickThrottle <= -0.80) {
+        if (acroSettings.manualAcroThrottle) {
+          // Throttle contínuo direto estilo rádio FPV real (-1.0 = idle 4%, +1.0 = 100%).
+          _vzPid.reset();
+          final norm = ((stickThrottle + 1.0) * 0.5).clamp(0.0, 1.0);
+          collectiveNormalized = (0.04 + norm * 0.96).clamp(0.04, 1.0);
+        } else if (stickThrottle <= -0.80) {
           _vzPid.reset();
           final t = (stickThrottle + 1.0).clamp(0.0, 0.20) / 0.20;
           collectiveNormalized = 0.04 + (hoverCmd * 0.25) * t;

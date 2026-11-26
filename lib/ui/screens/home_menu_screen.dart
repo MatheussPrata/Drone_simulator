@@ -57,6 +57,8 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
             AcroRatePreset.freestyle,
             fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
             coordinatedTurn: _acroSettings.coordinatedTurn,
+            floatingJoysticks: _acroSettings.floatingJoysticks,
+            manualAcroThrottle: _acroSettings.manualAcroThrottle,
           );
         }
       }
@@ -158,6 +160,10 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                                     fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
                                     coordinatedTurn:
                                         _acroSettings.coordinatedTurn,
+                                    floatingJoysticks:
+                                        _acroSettings.floatingJoysticks,
+                                    manualAcroThrottle:
+                                        _acroSettings.manualAcroThrottle,
                                   ),
                                 ),
                               ),
@@ -172,6 +178,10 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                                     fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
                                     coordinatedTurn:
                                         _acroSettings.coordinatedTurn,
+                                    floatingJoysticks:
+                                        _acroSettings.floatingJoysticks,
+                                    manualAcroThrottle:
+                                        _acroSettings.manualAcroThrottle,
                                   ),
                                 ),
                               ),
@@ -186,6 +196,10 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                                     fpvUptiltDeg: _acroSettings.fpvUptiltDeg,
                                     coordinatedTurn:
                                         _acroSettings.coordinatedTurn,
+                                    floatingJoysticks:
+                                        _acroSettings.floatingJoysticks,
+                                    manualAcroThrottle:
+                                        _acroSettings.manualAcroThrottle,
                                   ),
                                 ),
                               ),
@@ -242,6 +256,40 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                             activeColor: Colors.amberAccent,
                             onChanged: (enabled) => applyAcro(
                               _acroSettings.copyWith(coordinatedTurn: enabled),
+                            ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('acro_floating_sticks_switch'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Joystick Flutuante (toque livre nas laterais)',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                            value: _acroSettings.floatingJoysticks,
+                            activeColor: Colors.amberAccent,
+                            onChanged: (enabled) => applyAcro(
+                              _acroSettings.copyWith(
+                                floatingJoysticks: enabled,
+                              ),
+                            ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('acro_manual_throttle_switch'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Throttle Livre no Acro (sem auto-centro)',
+                              style:
+                                  TextStyle(color: Colors.white, fontSize: 12),
+                            ),
+                            value: _acroSettings.manualAcroThrottle,
+                            activeColor: Colors.amberAccent,
+                            onChanged: (enabled) => applyAcro(
+                              _acroSettings.copyWith(
+                                manualAcroThrottle: enabled,
+                              ),
                             ),
                           ),
                         ],

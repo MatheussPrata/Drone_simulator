@@ -791,6 +791,8 @@ class SimulatorController extends ChangeNotifier {
       preset,
       fpvUptiltDeg: sixDof.acroSettings.fpvUptiltDeg,
       coordinatedTurn: sixDof.acroSettings.coordinatedTurn,
+      floatingJoysticks: sixDof.acroSettings.floatingJoysticks,
+      manualAcroThrottle: sixDof.acroSettings.manualAcroThrottle,
     );
     setAcroSettings(updated, persist: persist);
   }

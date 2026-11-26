@@ -307,6 +307,34 @@ class MapSettingsModal extends StatelessWidget {
                     ),
                   ),
                   SwitchListTile(
+                    key: const Key('modal_acro_floating_sticks_switch'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Joystick Flutuante (toque livre)',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.acroSettings.floatingJoysticks,
+                    activeColor: Colors.amberAccent,
+                    onChanged: (v) => controller.setAcroSettings(
+                      controller.acroSettings.copyWith(floatingJoysticks: v),
+                    ),
+                  ),
+                  SwitchListTile(
+                    key: const Key('modal_acro_manual_throttle_switch'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Throttle Livre no Acro (sem auto-centro)',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                    value: controller.acroSettings.manualAcroThrottle,
+                    activeColor: Colors.amberAccent,
+                    onChanged: (v) => controller.setAcroSettings(
+                      controller.acroSettings.copyWith(manualAcroThrottle: v),
+                    ),
+                  ),
+                  SwitchListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: const Text(

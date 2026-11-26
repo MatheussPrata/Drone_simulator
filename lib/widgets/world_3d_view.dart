@@ -209,6 +209,7 @@ class _World3dViewState extends State<World3dView> {
     final armedForRender = s.isArmed || s.isReplaying;
 
     return '{"x":${s.x.toStringAsFixed(2)},"y":${s.y.toStringAsFixed(2)},"z":${s.z.toStringAsFixed(2)},'
+        '"groundHeightM":${s.currentGroundHeightM.toStringAsFixed(2)},'
         '"yaw":${s.yaw.toStringAsFixed(2)},"pitch":${s.visualPitch.toStringAsFixed(2)},"roll":${s.visualRoll.toStringAsFixed(2)},'
         '"visualPitch":${s.visualPitch.toStringAsFixed(2)},"visualRoll":${s.visualRoll.toStringAsFixed(2)},'
         '"pitchRad":${s.pitchRad.toStringAsFixed(4)},"rollRad":${s.rollRad.toStringAsFixed(4)},'

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/models/flight_map.dart';
+import 'package:drone_simulator/services/gamepad_service.dart';
 import 'package:drone_simulator/services/records_repository.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 import 'package:drone_simulator/ui/screens/home_menu_screen.dart';
@@ -86,14 +87,22 @@ class FlightSimulatorScreen extends StatefulWidget {
 
 class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   late final SimulatorController _controller;
+  late final GamepadInputBridge _gamepad;
   bool _lastIsMapPrimaryView = false;
+  bool _lastFloatingJoysticks = false;
+  bool _lastFreeThrottleActive = false;
 
   bool get _isFpvMain => !_controller.isMapPrimaryView;
+
+  bool get _computeFreeThrottleActive =>
+      _controller.flightMode == FlightControlMode.acro &&
+      _controller.acroSettings.manualAcroThrottle;
 
   @override
   void initState() {
     super.initState();
     _controller = SimulatorController(records: widget.recordsRepository);
+    _gamepad = GamepadInputBridge(controller: _controller)..attach();
     if (widget.initialAcroSettings != null) {
       _controller.setAcroSettings(widget.initialAcroSettings!, persist: false);
     }
@@ -115,6 +124,8 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
       );
     }
     _lastIsMapPrimaryView = _controller.isMapPrimaryView;
+    _lastFloatingJoysticks = _controller.acroSettings.floatingJoysticks;
+    _lastFreeThrottleActive = _computeFreeThrottleActive;
     _controller.start();
     _controller.addListener(_onControllerTick);
   }
@@ -134,14 +145,21 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   void _onControllerTick() {
     if (!mounted) return;
     final currentMapPrimary = _controller.isMapPrimaryView;
-    if (currentMapPrimary != _lastIsMapPrimaryView) {
+    final currentFloating = _controller.acroSettings.floatingJoysticks;
+    final currentFreeThrottle = _computeFreeThrottleActive;
+    if (currentMapPrimary != _lastIsMapPrimaryView ||
+        currentFloating != _lastFloatingJoysticks ||
+        currentFreeThrottle != _lastFreeThrottleActive) {
       _lastIsMapPrimaryView = currentMapPrimary;
+      _lastFloatingJoysticks = currentFloating;
+      _lastFreeThrottleActive = currentFreeThrottle;
       setState(() {});
     }
   }
 
   @override
   void dispose() {
+    _gamepad.detach();
     _controller.removeListener(_onControllerTick);
     _controller.dispose();
     super.dispose();
@@ -151,114 +169,121 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF101418),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // ── Camada 1: Visão Principal (Cenário 3D Three.js com OSD estilo DJI ou Mapa Real) ──
-          Positioned.fill(
-            child: _isFpvMain
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      World3dView(
-                        controller: _controller,
-                      ),
-                      FpvOsdOverlay(
-                        controller: _controller,
-                      ),
-                    ],
-                  )
-                : MiniMapWidget(
-                    controller: _controller,
-                    followDrone: true,
-                  ),
-          ),
-
-          // ── Camada 2: Card PiP Arredondado no Canto Inferior Esquerdo (Alternável entre Mini-Mapa e FPV) ──
-          Positioned(
-            left: 20,
-            bottom: 155, // Posicionada de forma limpa acima do joystick esquerdo
-            child: MiniMapPip(
-              controller: _controller,
-              onToggle: () => _controller.togglePrimaryView(),
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (_, event) => _gamepad.handleKeyEvent(event),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // ── Camada 1: Visão Principal (Cenário 3D Three.js com OSD estilo DJI ou Mapa Real) ──
+            Positioned.fill(
+              child: _isFpvMain
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        World3dView(
+                          controller: _controller,
+                        ),
+                        FpvOsdOverlay(
+                          controller: _controller,
+                        ),
+                      ],
+                    )
+                  : MiniMapWidget(
+                      controller: _controller,
+                      followDrone: true,
+                    ),
             ),
-          ),
 
-          // ── Camada 3: Slider Vertical de Inclinação do Gimbal da Câmera (0° a -90°) ──
-          Positioned(
-            right: 20,
-            bottom: 155, // Posicionado acima do joystick direito
-            child: GimbalSlider(
-              controller: _controller,
-            ),
-          ),
-
-          // ── Camada 4: Barra Superior de Telemetria e Alertas (Topo) ──
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: TelemetryHud(
-              controller: _controller,
-              actionsPlacement: HudActionsPlacement.top,
-              onOpenHomeMenu: _openHomeMenu,
-            ),
-          ),
-
-          // ── Camada 4.5: HUD do Modo Jogo + Cards de Queda/Vitória ──
-          Positioned.fill(
-            child: GameHudOverlay(
-              controller: _controller,
-              onOpenHomeMenu: _openHomeMenu,
-            ),
-          ),
-
-          // ── Camada 5: Joystick Esquerdo Modo 2 (Throttle / Yaw) - Translúcido ──
-          Positioned(
-            left: 28,
-            bottom: 24,
-            child: SafeArea(
-              top: false,
-              right: false,
-              child: VirtualJoystick(
-                label: 'THROTTLE / YAW',
-                radius: 56,
-                stickRadius: 20,
-                opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
-                onPositionChanged: (offset) {
-                  // Modo 2: para cima (-dy) = subir / aumentar altitude
-                  _controller.setManualInput(
-                    throttle: -offset.dy,
-                    yaw: offset.dx,
-                  );
-                },
+            // ── Camada 2: Card PiP Arredondado no Canto Inferior Esquerdo (Alternável entre Mini-Mapa e FPV) ──
+            Positioned(
+              left: 20,
+              bottom: 155, // Posicionada de forma limpa acima do joystick esquerdo
+              child: MiniMapPip(
+                controller: _controller,
+                onToggle: () => _controller.togglePrimaryView(),
               ),
             ),
-          ),
 
-          // ── Camada 6: Joystick Direito Modo 2 (Pitch / Roll) - Translúcido ──
-          Positioned(
-            right: 28,
-            bottom: 24,
-            child: SafeArea(
-              top: false,
-              left: false,
-              child: VirtualJoystick(
-                label: 'PITCH / ROLL',
-                radius: 56,
-                stickRadius: 20,
-                opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
-                onPositionChanged: (offset) {
-                  // Modo 2: para frente (-dy) = avançar; para direita (+dx) = rolar direita
-                  _controller.setManualInput(
-                    pitch: -offset.dy,
-                    roll: offset.dx,
-                  );
-                },
+            // ── Camada 3: Slider Vertical de Inclinação do Gimbal da Câmera (0° a -90°) ──
+            Positioned(
+              right: 20,
+              bottom: 155, // Posicionado acima do joystick direito
+              child: GimbalSlider(
+                controller: _controller,
               ),
             ),
-          ),
-        ],
+
+            // ── Camada 4: Barra Superior de Telemetria e Alertas (Topo) ──
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: TelemetryHud(
+                controller: _controller,
+                actionsPlacement: HudActionsPlacement.top,
+                onOpenHomeMenu: _openHomeMenu,
+              ),
+            ),
+
+            // ── Camada 4.5: HUD do Modo Jogo + Cards de Queda/Vitória ──
+            Positioned.fill(
+              child: GameHudOverlay(
+                controller: _controller,
+                onOpenHomeMenu: _openHomeMenu,
+              ),
+            ),
+
+            // ── Camada 5: Joystick Esquerdo Modo 2 (Throttle / Yaw) - Translúcido ──
+            Positioned(
+              left: _lastFloatingJoysticks ? 12 : 28,
+              bottom: _lastFloatingJoysticks ? 8 : 24,
+              child: SafeArea(
+                top: false,
+                right: false,
+                child: VirtualJoystick(
+                  label: 'THROTTLE / YAW',
+                  radius: 56,
+                  stickRadius: 20,
+                  opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
+                  floating: _lastFloatingJoysticks,
+                  autoCenterY: !_lastFreeThrottleActive,
+                  onPositionChanged: (offset) {
+                    // Modo 2: para cima (-dy) = subir / aumentar altitude
+                    _controller.setManualInput(
+                      throttle: -offset.dy,
+                      yaw: offset.dx,
+                    );
+                  },
+                ),
+              ),
+            ),
+
+            // ── Camada 6: Joystick Direito Modo 2 (Pitch / Roll) - Translúcido ──
+            Positioned(
+              right: _lastFloatingJoysticks ? 12 : 28,
+              bottom: _lastFloatingJoysticks ? 8 : 24,
+              child: SafeArea(
+                top: false,
+                left: false,
+                child: VirtualJoystick(
+                  label: 'PITCH / ROLL',
+                  radius: 56,
+                  stickRadius: 20,
+                  opacity: 0.70, // Translúcido sobre o vídeo da câmera sem obstruir
+                  floating: _lastFloatingJoysticks,
+                  onPositionChanged: (offset) {
+                    // Modo 2: para frente (-dy) = avançar; para direita (+dx) = rolar direita
+                    _controller.setManualInput(
+                      pitch: -offset.dy,
+                      roll: offset.dx,
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
