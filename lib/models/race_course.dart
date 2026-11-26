@@ -31,6 +31,28 @@ class RaceGate {
     this.radius = 4.5,
   });
 
+  /// Normal unitária horizontal do plano do portal (convenção ENU: 0° = Norte +Y, 90° = Leste +X).
+  (double nx, double ny) get planeNormal {
+    final rad = yawDeg * math.pi / 180.0;
+    return (math.sin(rad), math.cos(rad));
+  }
+
+  /// Distância com sinal do ponto ([px], [py]) ao plano vertical do portal.
+  double signedPlaneDistance(double px, double py) {
+    final (nx, ny) = planeNormal;
+    return (px - x) * nx + (py - y) * ny;
+  }
+
+  /// Distância radial dentro do plano do portal até o centro do anel.
+  double inPlaneRadius(double px, double py, double pz) {
+    final (nx, ny) = planeNormal;
+    final rx = px - x;
+    final ry = py - y;
+    final rz = pz - z;
+    final tangential = rx * ny - ry * nx;
+    return math.sqrt(tangential * tangential + rz * rz);
+  }
+
   Map<String, dynamic> toJson() => {
         'index': index,
         'x': double.parse(x.toStringAsFixed(2)),

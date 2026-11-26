@@ -1472,16 +1472,33 @@
       var raceModeOn = false;
       var guideArrow = null;
 
+      var raceActiveGateGroup = null;
+
+      function disposeGateObject(obj) {
+        if (!obj) return;
+        if (obj.children && obj.children.length > 0) {
+          while (obj.children.length > 0) {
+            disposeGateObject(obj.children.pop());
+          }
+        }
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      }
+
       function clearRaceGates() {
         while (raceGroup.children.length > 0) {
           var child = raceGroup.children.pop();
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
+          disposeGateObject(child);
         }
         raceGates = [];
+        raceActiveGateGroup = null;
       }
 
       function buildRaceGate(gate, isActive, isNext) {
+        var gateGroup = new THREE.Group();
+        gateGroup.position.set(gate.x, gate.z, -gate.y);
+        gateGroup.rotation.y = -(gate.yaw * Math.PI / 180.0);
+
         var color = isActive ? 0x00e5ff : (isNext ? 0x33dd66 : 0x88a0b4);
         var mat = new THREE.MeshBasicMaterial({
           color: color,
@@ -1493,12 +1510,11 @@
           new THREE.TorusGeometry(gate.radius, isActive ? 0.5 : 0.22, 10, 48),
           mat
         );
-        ring.position.set(gate.x, gate.z, -gate.y);
-        ring.rotation.y = (gate.yaw * Math.PI / 180.0) + Math.PI;
         ring.visible = true;
-        raceGroup.add(ring);
+        gateGroup.add(ring);
 
         if (isActive) {
+          raceActiveGateGroup = gateGroup;
           var haloMat = new THREE.MeshBasicMaterial({
             color: 0x00e5ff,
             transparent: true,
@@ -1509,9 +1525,7 @@
             new THREE.TorusGeometry(gate.radius + 1.1, 0.9, 8, 40),
             haloMat
           );
-          halo.position.copy(ring.position);
-          halo.rotation.copy(ring.rotation);
-          raceGroup.add(halo);
+          gateGroup.add(halo);
 
           for (var i = 0; i < 4; i++) {
             var arrow = new THREE.Mesh(
@@ -1520,15 +1534,16 @@
             );
             var angle = (i / 4) * Math.PI * 2;
             arrow.position.set(
-              gate.x + Math.cos(angle) * gate.radius,
-              gate.z + Math.sin(angle) * gate.radius,
-              -gate.y
+              Math.cos(angle) * gate.radius,
+              Math.sin(angle) * gate.radius,
+              0
             );
             arrow.rotation.z = angle + Math.PI;
-            raceGroup.add(arrow);
+            gateGroup.add(arrow);
           }
         }
-        return ring;
+        raceGroup.add(gateGroup);
+        return gateGroup;
       }
 
       function buildGateTrail(fromGate, toGate) {
@@ -1670,7 +1685,8 @@
         updateGuideArrow();
         if (raceModeOn && raceGroup.children.length > 0) {
           var pulse = 1.0 + 0.06 * Math.sin(performance.now() / 180.0);
-          raceGroup.children[0].scale.setScalar(pulse);
+          var pulseTarget = raceActiveGateGroup || raceGroup.children[0];
+          pulseTarget.scale.setScalar(pulse);
         }
 
         crashLed.visible = !droneState.isCrashed ||

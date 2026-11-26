@@ -25,10 +25,20 @@ class RaceManager {
   /// Melhor tempo por mapa (mapId → segundos).
   final Map<String, double> bestTimes = {};
 
+  /// Precisão radial no último portal cruzado (0.0 na borda .. 1.0 no centro).
+  double lastGateAccuracy = 0.0;
+
+  bool _hasPrevPos = false;
+  double _prevX = 0.0;
+  double _prevY = 0.0;
+  double _prevZ = 0.0;
+
   static const double comboWindowSeconds = 6.0;
   static const int maxCombo = 5;
   static const double initialTimeAttackSeconds = 25.0;
   static const double maxTimeAttackSeconds = 35.0;
+  static const double planeSlabTolerance = 0.65;
+  static const double teleportThresholdMeters = 15.0;
 
   RaceManager({
     required this.course,
@@ -70,10 +80,63 @@ class RaceManager {
     combo = 1;
     bestCombo = 1;
     timeSinceLastGate = 0.0;
+    lastGateAccuracy = 0.0;
+    _hasPrevPos = false;
+    _prevX = 0.0;
+    _prevY = 0.0;
+    _prevZ = 0.0;
   }
 
   /// Reinicia no mesmo circuito (usado após crash ou vitória).
   void restart() => start();
+
+  ({bool passed, double accuracy}) _didCrossGate(
+    RaceGate gate,
+    double x,
+    double y,
+    double z,
+  ) {
+    final dCurr = gate.signedPlaneDistance(x, y);
+
+    if (_hasPrevPos) {
+      final dPrev = gate.signedPlaneDistance(_prevX, _prevY);
+      final crossedPlane =
+          (dPrev < 0.0 && dCurr >= 0.0) || (dPrev > 0.0 && dCurr <= 0.0);
+      if (crossedPlane) {
+        final denom = dPrev - dCurr;
+        final t = denom.abs() > 1e-9 ? (dPrev / denom).clamp(0.0, 1.0) : 0.0;
+        final hitX = _prevX + (x - _prevX) * t;
+        final hitY = _prevY + (y - _prevY) * t;
+        final hitZ = _prevZ + (z - _prevZ) * t;
+        final radial = gate.inPlaneRadius(hitX, hitY, hitZ);
+        if (radial <= gate.radius) {
+          return (
+            passed: true,
+            accuracy: (1.0 - radial / gate.radius).clamp(0.0, 1.0),
+          );
+        }
+      }
+    }
+
+    // Fallback para primeiro frame ou teleporte direto sobre o portal.
+    final dx = x - _prevX;
+    final dy = y - _prevY;
+    final dz = z - _prevZ;
+    final segSq = dx * dx + dy * dy + dz * dz;
+    if (!_hasPrevPos || segSq > teleportThresholdMeters * teleportThresholdMeters) {
+      if (dCurr.abs() <= planeSlabTolerance) {
+        final radial = gate.inPlaneRadius(x, y, z);
+        if (radial <= gate.radius) {
+          return (
+            passed: true,
+            accuracy: (1.0 - radial / gate.radius).clamp(0.0, 1.0),
+          );
+        }
+      }
+    }
+
+    return (passed: false, accuracy: 0.0);
+  }
 
   /// Avança a corrida. Deve ser chamado a cada frame.
   void update({
@@ -94,24 +157,40 @@ class RaceManager {
 
     if (crashed) {
       status = RaceStatus.failed;
+      _prevX = x;
+      _prevY = y;
+      _prevZ = z;
+      _hasPrevPos = true;
       return;
     }
 
     if (timeAttackMode && remainingSeconds <= 0.0) {
       status = RaceStatus.finished;
       onFinished?.call(this);
+      _prevX = x;
+      _prevY = y;
+      _prevZ = z;
+      _hasPrevPos = true;
       return;
     }
 
     final gate = activeGate;
-    if (gate == null) return;
+    if (gate == null) {
+      _prevX = x;
+      _prevY = y;
+      _prevZ = z;
+      _hasPrevPos = true;
+      return;
+    }
 
-    final dx = gate.x - x;
-    final dy = gate.y - y;
-    final dz = gate.z - z;
-    final distance = math.sqrt(dx * dx + dy * dy + dz * dz);
+    final check = _didCrossGate(gate, x, y, z);
+    _prevX = x;
+    _prevY = y;
+    _prevZ = z;
+    _hasPrevPos = true;
 
-    if (distance > gate.radius) return;
+    if (!check.passed) return;
+    lastGateAccuracy = check.accuracy;
 
     // Passou pelo portal ativo: pontua e avança.
     final speedBonus = (speedKmh * 2.0).roundToDouble().clamp(0.0, 400.0);

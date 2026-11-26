@@ -97,6 +97,17 @@ class SimulatorController extends ChangeNotifier {
 
   final List<GhostFrame> _recordedGhostFrames = [];
   double _ghostSampleAccum = 0.0;
+  List<GhostFrame> _lastReplayFrames = const [];
+  GhostTrajectory? _replayTrajectory;
+  bool _isReplaying = false;
+  bool _isReplayPaused = false;
+  double _replayTimeSeconds = 0.0;
+  double _replaySpeed = 1.0;
+  CameraViewMode _preReplayCameraMode = CameraViewMode.fpv;
+  double _replayPitchRad = 0.0;
+  double _replayRollRad = 0.0;
+  double _replayYawRad = 0.0;
+  Quat _replayQuat = Quat.identity;
 
   double _manualThrottle = 0.0;
   double _manualYaw = 0.0;
@@ -164,16 +175,20 @@ class SimulatorController extends ChangeNotifier {
   double get battery => _battery;
   double get speedKmh => _speedKmh;
   double get gimbalPitch => physics.gimbalPitch;
-  double get visualPitch => !_isArmed
-      ? _benchPitchDeg
-      : (_lastSnapshot != null
-          ? _lastSnapshot!.pitchRad * 180.0 / pi
-          : physics.visualPitch);
-  double get visualRoll => !_isArmed
-      ? _benchRollDeg
-      : (_lastSnapshot != null
-          ? _lastSnapshot!.rollRad * 180.0 / pi
-          : physics.visualRoll);
+  double get visualPitch => _isReplaying
+      ? _replayPitchRad * 180.0 / pi
+      : (!_isArmed
+          ? _benchPitchDeg
+          : (_lastSnapshot != null
+              ? _lastSnapshot!.pitchRad * 180.0 / pi
+              : physics.visualPitch));
+  double get visualRoll => _isReplaying
+      ? _replayRollRad * 180.0 / pi
+      : (!_isArmed
+          ? _benchRollDeg
+          : (_lastSnapshot != null
+              ? _lastSnapshot!.rollRad * 180.0 / pi
+              : physics.visualRoll));
   CameraViewMode get cameraMode => _cameraMode;
   bool get isMapPrimaryView => _isMapPrimaryView;
   bool get isSatellite => _isSatellite;
@@ -222,6 +237,17 @@ class SimulatorController extends ChangeNotifier {
   double get raceDistanceToGate =>
       _raceManager?.distanceToNextGate(_x, _y, _z) ?? 0.0;
 
+  bool get hasReplayAvailable => _lastReplayFrames.length >= 2;
+  bool get isReplaying => _isReplaying;
+  bool get isReplayPaused => _isReplayPaused;
+  double get replayTimeSeconds => _replayTimeSeconds;
+  double get replayDurationSeconds => _replayTrajectory?.duration ??
+      (_lastReplayFrames.length >= 2 ? _lastReplayFrames.last.t : 0.0);
+  double get replayProgress => replayDurationSeconds > 0.0
+      ? (_replayTimeSeconds / replayDurationSeconds).clamp(0.0, 1.0)
+      : 0.0;
+  double get replaySpeed => _replaySpeed;
+
   TimeOfDayPreset get timeOfDay => _timeOfDay;
   double get windMultiplier => _windMultiplier;
   double get windDirectionDeg => _windDirectionDeg;
@@ -241,7 +267,9 @@ class SimulatorController extends ChangeNotifier {
 
   /// Posição do Ghost no instante atual da corrida (quando disponível).
   GhostFrame? get currentGhostFrame {
-    if (!_ghostEnabled || _simulatorMode != SimulatorMode.gateRace) return null;
+    if (_isReplaying || !_ghostEnabled || _simulatorMode != SimulatorMode.gateRace) {
+      return null;
+    }
     final race = _raceManager;
     if (race == null || race.status != RaceStatus.racing) return null;
     final trajectory = records.recordFor(activeMap.id).ghostTrajectory;
@@ -271,15 +299,23 @@ class SimulatorController extends ChangeNotifier {
     }
   }
 
-  /// Inclinação real (radianos) e quatérnio vindos do motor 6-DOF.
-  Quat get orientationQuat => _lastSnapshot?.orientation ?? Quat.identity;
-  double get pitchRad => _lastSnapshot?.pitchRad ?? 0.0;
-  double get rollRad => _lastSnapshot?.rollRad ?? 0.0;
-  double get yawRad => _lastSnapshot?.yawRad ?? 0.0;
+  /// Inclinação real (radianos) e quatérnio vindos do motor 6-DOF (ou do replay).
+  Quat get orientationQuat => _isReplaying
+      ? _replayQuat
+      : (_lastSnapshot?.orientation ?? Quat.identity);
+  double get pitchRad =>
+      _isReplaying ? _replayPitchRad : (_lastSnapshot?.pitchRad ?? 0.0);
+  double get rollRad =>
+      _isReplaying ? _replayRollRad : (_lastSnapshot?.rollRad ?? 0.0);
+  double get yawRad =>
+      _isReplaying ? _replayYawRad : (_lastSnapshot?.yawRad ?? 0.0);
 
   /// Rotação normalizada dos 4 motores [FR, RL, FL, RR].
-  List<double> get motorNormalizedRpm =>
-      _lastSnapshot?.motorNormalizedRpm ?? const [0.0, 0.0, 0.0, 0.0];
+  List<double> get motorNormalizedRpm => _isReplaying
+      ? (_isReplayPaused
+          ? const [0.0, 0.0, 0.0, 0.0]
+          : const [0.68, 0.68, 0.68, 0.68])
+      : (_lastSnapshot?.motorNormalizedRpm ?? const [0.0, 0.0, 0.0, 0.0]);
 
   double get windSpeedMps => _windSpeedMps;
   bool get inVortexRingState => _lastSnapshot?.inVortexRingState ?? false;
@@ -407,8 +443,171 @@ class SimulatorController extends ChangeNotifier {
     }
   }
 
+  void _clearReplayState({bool clearFrames = false}) {
+    _isReplaying = false;
+    _isReplayPaused = false;
+    _replayTimeSeconds = 0.0;
+    _replaySpeed = 1.0;
+    _replayTrajectory = null;
+    _replayPitchRad = 0.0;
+    _replayRollRad = 0.0;
+    _replayYawRad = 0.0;
+    _replayQuat = Quat.identity;
+    if (clearFrames) {
+      _lastReplayFrames = const [];
+    }
+  }
+
+  /// Inicia a reprodução em replay da última corrida concluída.
+  bool startReplay({CameraViewMode cameraMode = CameraViewMode.thirdPerson}) {
+    if (!hasReplayAvailable) return false;
+    _preReplayCameraMode = _cameraMode;
+    _cameraMode = cameraMode;
+    _replayTrajectory = GhostTrajectory(_lastReplayFrames);
+    _isReplaying = true;
+    _isReplayPaused = false;
+    _replayTimeSeconds = 0.0;
+    _replaySpeed = 1.0;
+    _applyReplaySample(0.0);
+    notifyListeners();
+    return true;
+  }
+
+  /// Alterna entre pausar e retomar o replay (reinicia se estiver no fim).
+  void toggleReplayPause() {
+    if (!_isReplaying) return;
+    final dur = replayDurationSeconds;
+    if (_isReplayPaused && dur > 0.0 && _replayTimeSeconds >= dur - 1e-4) {
+      _replayTimeSeconds = 0.0;
+      _isReplayPaused = false;
+      _applyReplaySample(0.0);
+    } else {
+      _isReplayPaused = !_isReplayPaused;
+    }
+    notifyListeners();
+  }
+
+  /// Salta para o instante [seconds] na linha do tempo do replay.
+  void seekReplay(double seconds) {
+    if (!_isReplaying) return;
+    _replayTimeSeconds = seconds.clamp(0.0, replayDurationSeconds);
+    _applyReplaySample(_replayTimeSeconds);
+    notifyListeners();
+  }
+
+  /// Cicla a velocidade de reprodução do replay: 1.0x → 2.0x → 0.5x → 1.0x.
+  void cycleReplaySpeed() {
+    if (!_isReplaying) return;
+    if (_replaySpeed == 1.0) {
+      _replaySpeed = 2.0;
+    } else if (_replaySpeed == 2.0) {
+      _replaySpeed = 0.5;
+    } else {
+      _replaySpeed = 1.0;
+    }
+    notifyListeners();
+  }
+
+  /// Reinicia o replay a partir de t = 0.0 s.
+  void restartReplay() {
+    if (!_isReplaying) return;
+    _replayTimeSeconds = 0.0;
+    _isReplayPaused = false;
+    _applyReplaySample(0.0);
+    notifyListeners();
+  }
+
+  /// Encerra o replay e retorna ao estado pós-corrida anterior.
+  void stopReplay() {
+    if (!_isReplaying) return;
+    _isReplaying = false;
+    _isReplayPaused = false;
+    _cameraMode = _preReplayCameraMode;
+    notifyListeners();
+  }
+
+  void _applyReplaySample(double t) {
+    final trajectory = _replayTrajectory;
+    if (trajectory == null || trajectory.isEmpty) return;
+    final frame = trajectory.sampleAt(t);
+    if (frame == null) return;
+
+    _x = frame.x;
+    _y = frame.y;
+    _z = frame.z;
+    _replayPitchRad = frame.pitchRad;
+    _replayRollRad = frame.rollRad;
+    _replayYawRad = frame.yawRad;
+    _replayQuat = Quat.fromEuler(
+      pitch: frame.pitchRad,
+      roll: frame.rollRad,
+      yaw: frame.yawRad,
+    );
+    _yaw = ((-frame.yawRad * 180.0 / pi) % 360.0 + 360.0) % 360.0;
+    _stableHeadingDeg = _yaw;
+    _currentGroundHeightM = _computeGroundHeightAt(_x, _y, _z);
+
+    final dur = trajectory.duration;
+    final tPrev = max(0.0, t - 0.05);
+    final tNext = min(dur, t + 0.05);
+    final span = tNext - tPrev;
+    if (span > 1e-4) {
+      final a = trajectory.sampleAt(tPrev)!;
+      final b = trajectory.sampleAt(tNext)!;
+      final dx = b.x - a.x;
+      final dy = b.y - a.y;
+      final dz = b.z - a.z;
+      _speedKmh = (sqrt(dx * dx + dy * dy + dz * dz) / span) * 3.6;
+    } else {
+      _speedKmh = 0.0;
+    }
+  }
+
   void _handleRaceFinished(RaceManager manager) {
     feedback.triggerFinish();
+    final framesCopy = List<GhostFrame>.from(_recordedGhostFrames);
+    if (framesCopy.isEmpty ||
+        (manager.elapsedSeconds - framesCopy.last.t) > 1e-4) {
+      framesCopy.add(GhostFrame(
+        t: manager.elapsedSeconds,
+        x: _x,
+        y: _y,
+        z: _z,
+        pitchRad: pitchRad,
+        rollRad: rollRad,
+        yawRad: yawRad,
+      ));
+    }
+    if (framesCopy.length == 1) {
+      if (framesCopy.first.t > 0.0) {
+        framesCopy.insert(
+          0,
+          GhostFrame(
+            t: 0.0,
+            x: framesCopy.first.x,
+            y: framesCopy.first.y,
+            z: framesCopy.first.z,
+            pitchRad: framesCopy.first.pitchRad,
+            rollRad: framesCopy.first.rollRad,
+            yawRad: framesCopy.first.yawRad,
+          ),
+        );
+      } else {
+        framesCopy.add(
+          GhostFrame(
+            t: max(0.1, manager.elapsedSeconds),
+            x: _x,
+            y: _y,
+            z: _z,
+            pitchRad: pitchRad,
+            rollRad: rollRad,
+            yawRad: yawRad,
+          ),
+        );
+      }
+    }
+    _lastReplayFrames = List<GhostFrame>.unmodifiable(framesCopy);
+
     if (manager.timeAttackMode) {
       records
           .saveTimeAttackResult(
@@ -423,7 +622,6 @@ class SimulatorController extends ChangeNotifier {
         _safeNotify();
       });
     } else {
-      final framesCopy = List<GhostFrame>.from(_recordedGhostFrames);
       records
           .saveRaceResult(
         mapId: manager.course.mapId,
@@ -732,6 +930,7 @@ class SimulatorController extends ChangeNotifier {
 
   /// Reseta o simulador, a física 6-DOF e a bateria.
   void reset({bool preserveFlightMode = false}) {
+    _clearReplayState(clearFrames: true);
     _status = SimulatorStatus.landed;
     _x = 0.0;
     _y = 0.0;
@@ -872,6 +1071,20 @@ class SimulatorController extends ChangeNotifier {
 
   /// Avança a simulação 6-DOF com delta time fixo (0.016s).
   void update([double dt = fixedDt]) {
+    if (_isReplaying) {
+      if (!_isReplayPaused) {
+        final dur = replayDurationSeconds;
+        _replayTimeSeconds += dt * _replaySpeed;
+        if (_replayTimeSeconds >= dur) {
+          _replayTimeSeconds = dur;
+          _isReplayPaused = true;
+        }
+      }
+      _applyReplaySample(_replayTimeSeconds);
+      notifyListeners();
+      return;
+    }
+
     if (_isArmed && _status != SimulatorStatus.landed) {
       _checkBatteryFailSafe();
     }
@@ -923,9 +1136,19 @@ class SimulatorController extends ChangeNotifier {
 
     final race = _raceManager;
     if (race != null && isRaceMode) {
-      if (_simulatorMode == SimulatorMode.gateRace &&
-          race.status == RaceStatus.racing &&
+      if (race.status == RaceStatus.racing &&
           _status != SimulatorStatus.crashed) {
+        if (_recordedGhostFrames.isEmpty) {
+          _recordedGhostFrames.add(GhostFrame(
+            t: race.elapsedSeconds,
+            x: _x,
+            y: _y,
+            z: _z,
+            pitchRad: pitchRad,
+            rollRad: rollRad,
+            yawRad: yawRad,
+          ));
+        }
         _ghostSampleAccum += dt;
         if (_ghostSampleAccum >= 0.10) {
           _ghostSampleAccum -= 0.10;
@@ -962,6 +1185,10 @@ class SimulatorController extends ChangeNotifier {
         omegaYawRadS: snapshot.angularVelocityBody.z,
         minObstacleClearance: minClearance,
         crashed: _status == SimulatorStatus.crashed,
+        upWorldZ:
+            snapshot.orientation.rotateBodyToWorld(const Vec3(0.0, 0.0, 1.0)).z,
+        horizontalSpeedMs: sqrt(snapshot.velocity.x * snapshot.velocity.x +
+            snapshot.velocity.y * snapshot.velocity.y),
       );
     }
 

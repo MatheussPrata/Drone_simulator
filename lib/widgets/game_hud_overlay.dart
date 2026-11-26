@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'package:drone_simulator/services/records_repository.dart';
@@ -5,7 +7,7 @@ import 'package:drone_simulator/simulation/freestyle_manager.dart';
 import 'package:drone_simulator/simulation/race_manager.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 
-/// HUD do Modo Jogo (Corrida, Time Attack, Freestyle) + cards de queda e vitória.
+/// HUD do Modo Jogo (Corrida, Time Attack, Freestyle) + cards de queda, vitória e replay.
 class GameHudOverlay extends StatelessWidget {
   final SimulatorController controller;
   final VoidCallback? onOpenHomeMenu;
@@ -33,13 +35,27 @@ class GameHudOverlay extends StatelessWidget {
         final isFreestyle = controller.isFreestyle;
         final raceStatus = controller.raceStatus;
         final freestyle = controller.freestyleManager;
-        final crashed = controller.isCrashed;
-        final finished = (isRace && raceStatus == RaceStatus.finished) ||
-            (isFreestyle && (freestyle?.isFinished ?? false));
+        final replaying = controller.isReplaying;
+        final crashed = !replaying && controller.isCrashed;
+        final finished = !replaying &&
+            ((isRace && raceStatus == RaceStatus.finished) ||
+                (isFreestyle && (freestyle?.isFinished ?? false)));
 
         return Stack(
           children: [
-            if ((isRace || isFreestyle) && !crashed && !finished)
+            if (replaying)
+              Positioned(
+                top: 74,
+                left: 12,
+                right: 12,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 620),
+                    child: _buildReplayBar(context),
+                  ),
+                ),
+              ),
+            if ((isRace || isFreestyle) && !replaying && !crashed && !finished)
               Positioned(
                 top: 74,
                 left: 0,
@@ -55,11 +71,187 @@ class GameHudOverlay extends StatelessWidget {
                   ),
                 ),
               ),
-            if (crashed) Center(child: _buildCrashCard(context)),
-            if (finished) Center(child: _buildFinishCard(context)),
+            if (crashed)
+              Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: _buildCrashCard(context),
+                ),
+              ),
+            if (finished)
+              Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: _buildFinishCard(context),
+                ),
+              ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildReplayBar(BuildContext context) {
+    final duration = math.max(0.1, controller.replayDurationSeconds);
+    final current = controller.replayTimeSeconds.clamp(0.0, duration);
+    final isThirdPerson = controller.cameraMode == CameraViewMode.thirdPerson;
+
+    return Container(
+      key: const Key('replay_controls_bar'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.84),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.cyanAccent.withOpacity(0.7)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.55),
+            blurRadius: 12,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.22),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.redAccent),
+                ),
+                child: const Text(
+                  'REPLAY',
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.9,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${formatTime(controller.replayTimeSeconds)} / '
+                '${formatTime(controller.replayDurationSeconds)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.bold,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    key: const Key('replay_progress_slider'),
+                    value: current,
+                    min: 0.0,
+                    max: duration,
+                    activeColor: Colors.cyanAccent,
+                    inactiveColor: Colors.white24,
+                    onChanged: controller.replayDurationSeconds > 0.0
+                        ? controller.seekReplay
+                        : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _replayActionButton(
+                  key: const Key('btn_replay_play_pause'),
+                  icon: controller.isReplayPaused
+                      ? Icons.play_arrow
+                      : Icons.pause,
+                  label: controller.isReplayPaused ? 'Play' : 'Pausar',
+                  color: Colors.cyanAccent,
+                  onTap: controller.toggleReplayPause,
+                ),
+                const SizedBox(width: 6),
+                _replayActionButton(
+                  key: const Key('btn_replay_restart'),
+                  icon: Icons.replay,
+                  label: 'Início',
+                  color: Colors.white70,
+                  onTap: controller.restartReplay,
+                ),
+                const SizedBox(width: 6),
+                _replayActionButton(
+                  key: const Key('btn_replay_speed'),
+                  icon: Icons.speed,
+                  label: '${controller.replaySpeed}x',
+                  color: Colors.amberAccent,
+                  onTap: controller.cycleReplaySpeed,
+                ),
+                const SizedBox(width: 6),
+                _replayActionButton(
+                  key: const Key('btn_replay_camera'),
+                  icon: isThirdPerson
+                      ? Icons.accessibility_new
+                      : Icons.videocam,
+                  label: isThirdPerson ? '3ªP' : 'FPV',
+                  color: Colors.lightGreenAccent,
+                  onTap: controller.toggleCameraMode,
+                ),
+                const SizedBox(width: 6),
+                _replayActionButton(
+                  key: const Key('btn_replay_exit'),
+                  icon: Icons.close,
+                  label: 'Sair',
+                  color: Colors.redAccent,
+                  onTap: controller.stopReplay,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _replayActionButton({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return OutlinedButton.icon(
+      key: key,
+      onPressed: onTap,
+      icon: Icon(icon, size: 14, color: color),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: color.withOpacity(0.55)),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: const Size(0, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      label: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 
@@ -409,6 +601,30 @@ class GameHudOverlay extends StatelessWidget {
             ],
           ],
           const SizedBox(height: 16),
+          if (controller.hasReplayAvailable) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                key: const Key('btn_watch_replay'),
+                onPressed: controller.startReplay,
+                icon: const Icon(Icons.play_circle_outline, size: 18),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.cyanAccent,
+                  side: const BorderSide(color: Colors.cyanAccent),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                label: const Text(
+                  'ASSISTIR REPLAY',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, letterSpacing: 1),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           SizedBox(
             width: double.infinity,
             height: 44,

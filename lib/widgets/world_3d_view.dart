@@ -187,7 +187,8 @@ class _World3dViewState extends State<World3dView> {
     final isFlying = s.status == SimulatorStatus.flying ||
         s.status == SimulatorStatus.takingOff ||
         s.status == SimulatorStatus.rth ||
-        s.status == SimulatorStatus.hovering;
+        s.status == SimulatorStatus.hovering ||
+        (s.isReplaying && !s.isReplayPaused);
 
     final motors = s.motorNormalizedRpm
         .map((m) => m.clamp(0.0, 1.0).toStringAsFixed(3))
@@ -204,6 +205,9 @@ class _World3dViewState extends State<World3dView> {
             '"rollRad":${ghost.rollRad.toStringAsFixed(4)},'
             '"yawRad":${ghost.yawRad.toStringAsFixed(4)}}';
 
+    final audioOn = s.audioEnabled && (!s.isReplaying || !s.isReplayPaused);
+    final armedForRender = s.isArmed || s.isReplaying;
+
     return '{"x":${s.x.toStringAsFixed(2)},"y":${s.y.toStringAsFixed(2)},"z":${s.z.toStringAsFixed(2)},'
         '"yaw":${s.yaw.toStringAsFixed(2)},"pitch":${s.visualPitch.toStringAsFixed(2)},"roll":${s.visualRoll.toStringAsFixed(2)},'
         '"visualPitch":${s.visualPitch.toStringAsFixed(2)},"visualRoll":${s.visualRoll.toStringAsFixed(2)},'
@@ -215,10 +219,10 @@ class _World3dViewState extends State<World3dView> {
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
         '"flightMode":"${s.flightMode.name}",'
         '"fpvUptiltDeg":${s.fpvUptiltDeg.toStringAsFixed(1)},'
-        '"audioEnabled":${s.audioEnabled},'
+        '"audioEnabled":$audioOn,'
         '"speedKmh":${s.speedKmh.toStringAsFixed(1)},'
         '"ghost":$ghostJson,'
-        '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":${s.isArmed},'
+        '"flying":$isFlying,"battery":${s.battery.toStringAsFixed(1)},"isArmed":$armedForRender,'
         '"impactShake":${s.impactShake.toStringAsFixed(3)},'
         '"isCrashed":${s.isCrashed},'
         '"crashImpactSpeedKmh":${s.crashImpactSpeedKmh.toStringAsFixed(1)},'

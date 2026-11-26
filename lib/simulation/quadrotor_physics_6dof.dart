@@ -188,6 +188,25 @@ class Quat {
 
   Quat get conjugate => Quat(w, -x, -y, -z);
 
+  Quat operator *(Quat o) => Quat(
+        w * o.w - x * o.x - y * o.y - z * o.z,
+        w * o.x + x * o.w + y * o.z - z * o.y,
+        w * o.y - x * o.z + y * o.w + z * o.x,
+        w * o.z + x * o.y - y * o.x + z * o.w,
+      );
+
+  /// Constrói quatérnio a partir de ângulos de Euler em radianos compatíveis com [toEulerRadians].
+  static Quat fromEuler({
+    required double pitch,
+    required double roll,
+    required double yaw,
+  }) {
+    final qYaw = Quat(math.cos(yaw * 0.5), 0.0, 0.0, math.sin(yaw * 0.5));
+    final qPitch = Quat(math.cos(pitch * 0.5), math.sin(pitch * 0.5), 0.0, 0.0);
+    final qRoll = Quat(math.cos(roll * 0.5), 0.0, math.sin(roll * 0.5), 0.0);
+    return (qYaw * qPitch * qRoll).normalized();
+  }
+
   /// Rotaciona um vetor do referencial do corpo (Body) para o mundo (World ENU).
   Vec3 rotateBodyToWorld(Vec3 v) {
     final qv = Vec3(x, y, z);

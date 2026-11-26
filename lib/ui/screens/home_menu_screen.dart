@@ -509,7 +509,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
       (
         mode: SimulatorMode.freestyle,
         title: 'Freestyle Acro',
-        subtitle: '90s para somar Flips 360°, Barrel Rolls, Dives e Voos Rasantes.',
+        subtitle: '90s para somar Power Loops, Split-S, Flips 360°, Inverted e Dives.',
         icon: Icons.cyclone,
         color: Colors.purpleAccent,
       ),

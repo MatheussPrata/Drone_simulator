@@ -20,6 +20,7 @@ class FreestyleManager {
   String? lastTrickLabel;
   double lastTrickPoints = 0.0;
   double lastTrickAgeSec = 99.0;
+  final Map<String, int> trickBreakdown = {};
 
   double _accPitch = 0.0;
   double _accRoll = 0.0;
@@ -27,6 +28,14 @@ class FreestyleManager {
   double _timeSinceTrick = 0.0;
   double _proximityHoldSec = 0.0;
   bool _inDive = false;
+  double _loopMinAlt = double.infinity;
+  double _loopMaxAlt = 0.0;
+  double _loopPeakSpeedKmh = 0.0;
+  int _splitSStage = 0;
+  double _splitSEntryAlt = 0.0;
+  double _splitSTimer = 0.0;
+  double _splitSPitchAccum = 0.0;
+  double _invertedHoldSec = 0.0;
 
   FreestyleManager({this.onTrick, this.onFinished});
 
@@ -41,7 +50,21 @@ class FreestyleManager {
     lastTrickLabel = null;
     lastTrickPoints = 0.0;
     lastTrickAgeSec = 99.0;
+    trickBreakdown.clear();
     _resetAccumulators();
+  }
+
+  void _resetLoopTrackers() {
+    _loopMinAlt = double.infinity;
+    _loopMaxAlt = 0.0;
+    _loopPeakSpeedKmh = 0.0;
+  }
+
+  void _resetSplitS() {
+    _splitSStage = 0;
+    _splitSEntryAlt = 0.0;
+    _splitSTimer = 0.0;
+    _splitSPitchAccum = 0.0;
   }
 
   void _resetAccumulators() {
@@ -51,6 +74,9 @@ class FreestyleManager {
     _timeSinceTrick = 0.0;
     _proximityHoldSec = 0.0;
     _inDive = false;
+    _invertedHoldSec = 0.0;
+    _resetLoopTrackers();
+    _resetSplitS();
   }
 
   void update({
@@ -63,6 +89,8 @@ class FreestyleManager {
     required double omegaYawRadS,
     required double minObstacleClearance,
     required bool crashed,
+    double upWorldZ = 1.0,
+    double horizontalSpeedMs = 0.0,
   }) {
     if (!isActive || isFinished) return;
 
@@ -93,14 +121,25 @@ class FreestyleManager {
       _accYaw *= 0.85;
       _proximityHoldSec = 0.0;
       _inDive = false;
+      _invertedHoldSec = 0.0;
+      _resetLoopTrackers();
+      _resetSplitS();
       return;
     }
 
-    // 1. Acumulação de flips / rolls / spins 360°
+    // 1. Acumulação de flips / power loops / barrel rolls / spins 360°
     if (omegaPitchRadS.abs() > 0.35) {
       _accPitch += omegaPitchRadS * dt;
     } else {
       _accPitch *= math.max(0.0, 1.0 - dt * 2.5);
+    }
+
+    if (_accPitch.abs() >= 0.25) {
+      _loopMinAlt = math.min(_loopMinAlt, altitude);
+      _loopMaxAlt = math.max(_loopMaxAlt, altitude);
+      _loopPeakSpeedKmh = math.max(_loopPeakSpeedKmh, speedKmh);
+    } else {
+      _resetLoopTrackers();
     }
 
     if (omegaRollRadS.abs() > 0.35) {
@@ -118,11 +157,54 @@ class FreestyleManager {
     const fullFlipThreshold = 2.0 * math.pi * 0.90;
     const fullYawThreshold = 2.0 * math.pi * 0.95;
 
-    if (_accPitch.abs() >= fullFlipThreshold) {
-      _awardTrick('FLIP 360°', 250.0);
-      _accPitch = 0.0;
+    // 2. Split-S: rolar invertido em altura, puxar pitch no mergulho e nivelar abaixo.
+    var awardedSplitS = false;
+    if (_splitSStage == 0) {
+      if (altitude >= 8.0 && upWorldZ < -0.25 && _accRoll.abs() >= 1.8) {
+        _splitSStage = 1;
+        _splitSEntryAlt = altitude;
+        _splitSTimer = 0.0;
+        _splitSPitchAccum = 0.0;
+      }
+    } else if (_splitSStage == 1) {
+      _splitSTimer += dt;
+      if (_splitSTimer > 3.5) {
+        _resetSplitS();
+      } else if (omegaPitchRadS.abs() > 0.6 &&
+          (verticalSpeedMs <= -3.0 || _splitSEntryAlt - altitude >= 3.0)) {
+        _splitSStage = 2;
+      }
+    } else if (_splitSStage == 2) {
+      _splitSTimer += dt;
+      _splitSPitchAccum += omegaPitchRadS.abs() * dt;
+      if (_splitSTimer > 4.5) {
+        _resetSplitS();
+      } else if (upWorldZ > 0.60 &&
+          verticalSpeedMs > -2.5 &&
+          (_splitSEntryAlt - altitude) >= 4.0 &&
+          _splitSPitchAccum >= 1.8) {
+        _awardTrick('SPLIT-S', 380.0);
+        _resetSplitS();
+        _accRoll = 0.0;
+        _accPitch = 0.0;
+        _resetLoopTrackers();
+        _inDive = false;
+        awardedSplitS = true;
+      }
     }
-    if (_accRoll.abs() >= fullFlipThreshold) {
+
+    if (!awardedSplitS && _accPitch.abs() >= fullFlipThreshold) {
+      final altSwing =
+          _loopMinAlt.isFinite ? (_loopMaxAlt - _loopMinAlt) : 0.0;
+      if (altSwing >= 4.5 && _loopPeakSpeedKmh >= 25.0) {
+        _awardTrick('POWER LOOP', 400.0);
+      } else {
+        _awardTrick('FLIP 360°', 250.0);
+      }
+      _accPitch = 0.0;
+      _resetLoopTrackers();
+    }
+    if (!awardedSplitS && _accRoll.abs() >= fullFlipThreshold) {
       _awardTrick('BARREL ROLL 360°', 250.0);
       _accRoll = 0.0;
     }
@@ -131,7 +213,18 @@ class FreestyleManager {
       _accYaw = 0.0;
     }
 
-    // 2. Mergulho vertical + recuperação limpa
+    // 3. Inverted Hangtime: voo sustentado de cabeça para baixo.
+    if (upWorldZ < -0.35 && altitude > 3.0) {
+      _invertedHoldSec += dt;
+      if (_invertedHoldSec >= 0.90) {
+        _awardTrick('INVERTED HANGTIME', 220.0);
+        _invertedHoldSec = 0.0;
+      }
+    } else {
+      _invertedHoldSec = math.max(0.0, _invertedHoldSec - dt * 2.5);
+    }
+
+    // 4. Mergulho vertical + recuperação limpa
     if (verticalSpeedMs <= -7.5 && altitude > 8.0) {
       _inDive = true;
     } else if (_inDive && verticalSpeedMs > -1.0 && altitude > 1.2) {
@@ -139,7 +232,7 @@ class FreestyleManager {
       _awardTrick('DIVE RECOVERY', 300.0);
     }
 
-    // 3. Voo rasante próximo ao solo ou obstáculos
+    // 5. Voo rasante próximo ao solo ou obstáculos
     if (speedKmh >= 24.0 && (altitude < 2.8 || minObstacleClearance < 4.5)) {
       _proximityHoldSec += dt;
       if (_proximityHoldSec >= 0.70) {
@@ -155,6 +248,7 @@ class FreestyleManager {
     final earned = (basePoints * combo).roundToDouble();
     score += earned;
     tricksCount++;
+    trickBreakdown[label] = (trickBreakdown[label] ?? 0) + 1;
     lastTrickLabel = label;
     lastTrickPoints = earned;
     lastTrickAgeSec = 0.0;
