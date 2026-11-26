@@ -76,6 +76,7 @@
         cameraMode: 'fpv', // 'fpv' ou 'thirdPerson'
         flightMode: 'stabilized',
         fpvUptiltDeg: 12.0,
+        baseFovDeg: 64.0,
         audioEnabled: true,
         speedKmh: 0.0,
         flying: false,
@@ -1030,6 +1031,9 @@
       var droneGroup = new THREE.Group();
       droneGroup.rotation.order = 'YXZ';
       var dronePropellers = [];
+      var droneAccentMat = null;
+      var droneArmMat = null;
+      var droneLedMats = [];
 
       function buildDroneMesh(targetGroup, propsOut, isGhost) {
         var opacityVal = isGhost ? 0.42 : 1.0;
@@ -1048,6 +1052,12 @@
         var propMat = isGhost
           ? new THREE.MeshBasicMaterial({ color: 0x80f8ff, transparent: true, opacity: 0.35 })
           : new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.85 });
+
+        if (!isGhost) {
+          droneAccentMat = accentMat;
+          droneArmMat = armMat;
+          droneLedMats = [];
+        }
 
         var bodyTop = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.36), bodyMat);
         bodyTop.position.y = 0.04;
@@ -1101,12 +1111,14 @@
 
           if (!isGhost) {
             var ledColor = m.isFront ? 0xffffff : (m.isRight ? 0x00ff44 : 0xff2222);
+            var ledMat = new THREE.MeshBasicMaterial({ color: ledColor });
             var ledMesh = new THREE.Mesh(
               new THREE.SphereGeometry(0.018, 8, 8),
-              new THREE.MeshBasicMaterial({ color: ledColor })
+              ledMat
             );
             ledMesh.position.set(m.x * 0.9, 0.015, m.z * 0.9);
             targetGroup.add(ledMesh);
+            droneLedMats.push({ mat: ledMat, isFront: m.isFront, isRight: m.isRight });
           }
         });
 
@@ -1137,6 +1149,30 @@
       droneGroup.position.set(0, 0.11, 0);
       droneGroup.visible = false;
       scene.add(droneGroup);
+
+      window.setDroneAppearance = function (payload) {
+        var data = payload;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            return;
+          }
+        }
+        if (!data || typeof data !== 'object') return;
+        if (typeof data.ledColor === 'string') {
+          if (droneAccentMat) droneAccentMat.color.set(data.ledColor);
+          for (var i = 0; i < droneLedMats.length; i++) {
+            droneLedMats[i].mat.color.set(data.ledColor);
+          }
+        }
+        if (typeof data.armColor === 'string' && droneArmMat) {
+          droneArmMat.color.set(data.armColor);
+        }
+        if (typeof data.baseFov === 'number') {
+          droneState.baseFovDeg = Math.max(55, Math.min(105, data.baseFov));
+        }
+      };
 
       // LED traseiro que pisca em vermelho durante o crash.
       var crashLedMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
@@ -1281,6 +1317,9 @@
         if (typeof data.cameraMode === 'string') droneState.cameraMode = data.cameraMode;
         if (typeof data.flightMode === 'string') droneState.flightMode = data.flightMode;
         if (typeof data.fpvUptiltDeg === 'number') droneState.fpvUptiltDeg = data.fpvUptiltDeg;
+        if (typeof data.baseFovDeg === 'number') {
+          droneState.baseFovDeg = Math.max(55, Math.min(105, data.baseFovDeg));
+        }
         if (typeof data.audioEnabled === 'boolean') droneState.audioEnabled = data.audioEnabled;
         if (typeof data.speedKmh === 'number') droneState.speedKmh = data.speedKmh;
         if (typeof data.flying === 'boolean') droneState.flying = data.flying;
@@ -1500,8 +1539,9 @@
           camera.rotateZ(camRoll * (1.0 - maneuverZoom));
         }
 
-        // Efeito leve de FOV dinâmico com velocidade para sensação de imersão.
-        var targetFov = 62 + Math.min(18, (droneState.speedKmh || 0) * 0.16);
+        // Efeito leve de FOV dinâmico com velocidade a partir do FOV base da garagem.
+        var baseFov = Number(droneState.baseFovDeg) || 64;
+        var targetFov = baseFov + Math.min(18, (droneState.speedKmh || 0) * 0.16);
         if (Math.abs(camera.fov - targetFov) > 0.25) {
           camera.fov += (targetFov - camera.fov) * Math.min(1.0, dt * 6.0);
           camera.updateProjectionMatrix();
@@ -1639,13 +1679,115 @@
         }
       }
 
-      function updateGuideArrow() {
-        if (!raceModeOn || raceGates.length === 0) {
-          if (guideArrow) guideArrow.visible = false;
-          return;
+      // ── Missões Aéreas & Waypoints 3D ──
+      var missionGroup = new THREE.Group();
+      scene.add(missionGroup);
+      var missionCheckpoints = [];
+      var missionActiveIndex = 0;
+      var missionModeOn = false;
+      var missionActiveBeacon = null;
+
+      function clearMissionMarkers() {
+        while (missionGroup.children.length > 0) {
+          var child = missionGroup.children.pop();
+          disposeGateObject(child);
         }
-        var gate = raceGates[raceActiveIndex];
-        if (!gate) {
+        missionCheckpoints = [];
+        missionActiveBeacon = null;
+      }
+
+      function buildMissionCheckpoint(cp, isActive, isDone) {
+        var cpGroup = new THREE.Group();
+        cpGroup.position.set(cp.x, cp.z, -cp.y);
+
+        var color = cp.requireLanding
+          ? 0x00ff88
+          : (isActive ? 0xffcc00 : (isDone ? 0x5f7486 : 0x2de2e6));
+        var radius = Math.max(2.0, Number(cp.captureRadius) || 6.0);
+        var ringMat = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: isActive ? 0.92 : (isDone ? 0.18 : 0.45),
+          side: THREE.DoubleSide
+        });
+        var ring = new THREE.Mesh(
+          new THREE.RingGeometry(Math.max(0.4, radius - 0.55), radius, 36),
+          ringMat
+        );
+        ring.rotation.x = -Math.PI / 2;
+        cpGroup.add(ring);
+
+        if (cp.requireLanding) {
+          var innerRing = new THREE.Mesh(
+            new THREE.RingGeometry(0.6, Math.max(1.2, radius * 0.45), 28),
+            new THREE.MeshBasicMaterial({
+              color: 0xffffff,
+              transparent: true,
+              opacity: isActive ? 0.85 : 0.35,
+              side: THREE.DoubleSide
+            })
+          );
+          innerRing.rotation.x = -Math.PI / 2;
+          innerRing.position.y = 0.05;
+          cpGroup.add(innerRing);
+        } else {
+          var pillarH = isActive ? 10.0 : 6.0;
+          var pillar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.18, 0.32, pillarH, 10, 1, true),
+            new THREE.MeshBasicMaterial({
+              color: color,
+              transparent: true,
+              opacity: isActive ? 0.38 : 0.16,
+              side: THREE.DoubleSide
+            })
+          );
+          cpGroup.add(pillar);
+        }
+
+        if (isActive) {
+          missionActiveBeacon = cpGroup;
+        }
+        missionGroup.add(cpGroup);
+      }
+
+      window.updateMissionState = function (payload) {
+        var data = payload;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (e) {
+            console.error('Falha ao ler missão:', e);
+            return;
+          }
+        }
+        if (!data) return;
+
+        missionModeOn = !!data.active;
+        missionActiveIndex = Number(data.activeIndex) || 0;
+        clearMissionMarkers();
+
+        if (!missionModeOn) return;
+        var cps = data.checkpoints || [];
+        for (var i = 0; i < cps.length; i++) {
+          missionCheckpoints.push(cps[i]);
+          buildMissionCheckpoint(cps[i], i === missionActiveIndex, i < missionActiveIndex);
+        }
+        if (missionActiveIndex >= 0 && missionActiveIndex + 1 < missionCheckpoints.length) {
+          buildGateTrail(
+            missionCheckpoints[missionActiveIndex],
+            missionCheckpoints[missionActiveIndex + 1]
+          );
+        }
+      };
+
+      function updateGuideArrow() {
+        var targetItem = null;
+        if (raceModeOn && raceGates.length > 0) {
+          targetItem = raceGates[raceActiveIndex];
+        } else if (missionModeOn && missionCheckpoints.length > 0) {
+          targetItem = missionCheckpoints[missionActiveIndex];
+        }
+        if (!targetItem) {
           if (guideArrow) guideArrow.visible = false;
           return;
         }
@@ -1657,13 +1799,14 @@
           );
           scene.add(guideArrow);
         }
+        guideArrow.material.color.setHex(missionModeOn ? 0xffcc00 : 0x00e5ff);
         guideArrow.visible = true;
         guideArrow.position.set(
           droneGroup.position.x,
           droneGroup.position.y + 1.6,
           droneGroup.position.z
         );
-        var target = new THREE.Vector3(gate.x, gate.z, -gate.y);
+        var target = new THREE.Vector3(targetItem.x, targetItem.z, -targetItem.y);
         var dir = target.clone().sub(guideArrow.position).normalize();
         guideArrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
       }
@@ -1756,6 +1899,10 @@
           var pulse = 1.0 + 0.06 * Math.sin(performance.now() / 180.0);
           var pulseTarget = raceActiveGateGroup || raceGroup.children[0];
           pulseTarget.scale.setScalar(pulse);
+        }
+        if (missionModeOn && missionActiveBeacon) {
+          var mPulse = 1.0 + 0.08 * Math.sin(performance.now() / 220.0);
+          missionActiveBeacon.scale.set(mPulse, 1.0, mPulse);
         }
 
         crashLed.visible = !droneState.isCrashed ||

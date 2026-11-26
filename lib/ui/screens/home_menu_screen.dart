@@ -24,7 +24,11 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
   DroneProfile _selectedProfile = DroneProfile.fpvRacer;
   FlightControlMode _selectedFlightMode = FlightControlMode.stabilized;
   TimeOfDayPreset _selectedTimeOfDay = TimeOfDayPreset.day;
+  CourseDifficulty _selectedDifficulty = CourseDifficulty.medium;
+  CourseDirection _selectedDirection = CourseDirection.standard;
+  String? _selectedMissionId;
   AcroSettings _acroSettings = const AcroSettings();
+  DroneTuning _droneTuning = const DroneTuning();
   bool _audioEnabled = true;
   bool _hapticsEnabled = true;
   bool _ghostEnabled = true;
@@ -36,11 +40,18 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
     if (_records.hasSavedAcroSettings) {
       _acroSettings = _records.acroSettings;
     }
+    if (_records.hasSavedDroneTuning) {
+      _droneTuning = _records.droneTuning;
+    }
+    _selectedMissionId = AerialMission.forMap(_selectedMap).first.id;
     _records.loadAll().then((_) {
       if (mounted) {
         setState(() {
           if (_records.hasSavedAcroSettings) {
             _acroSettings = _records.acroSettings;
+          }
+          if (_records.hasSavedDroneTuning) {
+            _droneTuning = _records.droneTuning;
           }
         });
       }
@@ -61,6 +72,12 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
             manualAcroThrottle: _acroSettings.manualAcroThrottle,
           );
         }
+      } else if (mode == SimulatorMode.missions) {
+        final missions = AerialMission.forMap(_selectedMap);
+        if (_selectedMissionId == null ||
+            !missions.any((m) => m.id == _selectedMissionId)) {
+          _selectedMissionId = missions.first.id;
+        }
       }
     });
   }
@@ -75,6 +92,10 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
           initialFlightMode: _selectedFlightMode,
           initialTimeOfDay: _selectedTimeOfDay,
           initialAcroSettings: _acroSettings,
+          initialCourseDifficulty: _selectedDifficulty,
+          initialCourseDirection: _selectedDirection,
+          initialMissionId: _selectedMissionId,
+          initialDroneTuning: _droneTuning,
           initialAudioEnabled: _audioEnabled,
           initialHapticsEnabled: _hapticsEnabled,
           initialGhostEnabled: _ghostEnabled,
@@ -88,8 +109,249 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
         if (_records.hasSavedAcroSettings) {
           _acroSettings = _records.acroSettings;
         }
+        if (_records.hasSavedDroneTuning) {
+          _droneTuning = _records.droneTuning;
+        }
       });
     }
+  }
+
+  void _openGarageSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          void applyTuning(DroneTuning updated) {
+            setState(() => _droneTuning = updated);
+            setSheetState(() {});
+            _records.saveDroneTuning(updated);
+          }
+
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height - 28,
+              ),
+              margin: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF141B24).withOpacity(0.97),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.6)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Garagem & Tuning do Drone',
+                        style: TextStyle(
+                          color: Colors.cyanAccent,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('garage_sheet_close_button'),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Cor dos LEDs e Faixa',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 11.5),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              for (var i = 0;
+                                  i < DroneTuning.ledPalette.length;
+                                  i++)
+                                GestureDetector(
+                                  key: Key('garage_led_$i'),
+                                  onTap: () => applyTuning(
+                                    _droneTuning.copyWith(
+                                      ledColorHex: DroneTuning.ledPalette[i],
+                                    ),
+                                  ),
+                                  child: Container(
+                                    width: 26,
+                                    height: 26,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Color(
+                                        int.parse(
+                                          'FF${DroneTuning.ledPalette[i].substring(1)}',
+                                          radix: 16,
+                                        ),
+                                      ),
+                                      border: Border.all(
+                                        color: _droneTuning.ledColorHex ==
+                                                DroneTuning.ledPalette[i]
+                                            ? Colors.white
+                                            : Colors.white24,
+                                        width: _droneTuning.ledColorHex ==
+                                                DroneTuning.ledPalette[i]
+                                            ? 2.4
+                                            : 1.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Cor dos Braços',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 11.5),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              for (var i = 0;
+                                  i < DroneTuning.armPalette.length;
+                                  i++)
+                                GestureDetector(
+                                  key: Key('garage_arm_$i'),
+                                  onTap: () => applyTuning(
+                                    _droneTuning.copyWith(
+                                      armColorHex: DroneTuning.armPalette[i],
+                                    ),
+                                  ),
+                                  child: Container(
+                                    width: 26,
+                                    height: 26,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Color(
+                                        int.parse(
+                                          'FF${DroneTuning.armPalette[i].substring(1)}',
+                                          radix: 16,
+                                        ),
+                                      ),
+                                      border: Border.all(
+                                        color: _droneTuning.armColorHex ==
+                                                DroneTuning.armPalette[i]
+                                            ? Colors.cyanAccent
+                                            : Colors.white24,
+                                        width: _droneTuning.armColorHex ==
+                                                DroneTuning.armPalette[i]
+                                            ? 2.4
+                                            : 1.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _sliderRow(
+                            sliderKey: const Key('garage_fov_slider'),
+                            label: 'FOV Câmera',
+                            valueText: '${_droneTuning.cameraFovDeg.round()}°',
+                            value: _droneTuning.cameraFovDeg,
+                            min: 55.0,
+                            max: 105.0,
+                            onChanged: (v) => applyTuning(
+                              _droneTuning.copyWith(cameraFovDeg: v),
+                            ),
+                          ),
+                          Wrap(
+                            spacing: 6,
+                            children: [
+                              _presetChip(
+                                label: 'Cine 64°',
+                                selected:
+                                    (_droneTuning.cameraFovDeg - 64.0).abs() < 2.0,
+                                onTap: () => applyTuning(
+                                  _droneTuning.copyWith(cameraFovDeg: 64.0),
+                                ),
+                              ),
+                              _presetChip(
+                                label: 'FPV 82°',
+                                selected:
+                                    (_droneTuning.cameraFovDeg - 82.0).abs() < 2.0,
+                                onTap: () => applyTuning(
+                                  _droneTuning.copyWith(cameraFovDeg: 82.0),
+                                ),
+                              ),
+                              _presetChip(
+                                label: 'Wide 98°',
+                                selected:
+                                    (_droneTuning.cameraFovDeg - 98.0).abs() < 2.0,
+                                onTap: () => applyTuning(
+                                  _droneTuning.copyWith(cameraFovDeg: 98.0),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          _sliderRow(
+                            sliderKey: const Key('garage_weight_slider'),
+                            label: 'Peso Frame',
+                            valueText:
+                                '${(_droneTuning.weightMultiplier * 100).round()}%',
+                            value: _droneTuning.weightMultiplier,
+                            min: 0.80,
+                            max: 1.30,
+                            onChanged: (v) => applyTuning(
+                              _droneTuning.copyWith(weightMultiplier: v),
+                            ),
+                          ),
+                          _sliderRow(
+                            sliderKey: const Key('garage_battery_slider'),
+                            label: 'Bateria',
+                            valueText:
+                                '${(_droneTuning.batteryCapacityMultiplier * 100).round()}%',
+                            value: _droneTuning.batteryCapacityMultiplier,
+                            min: 0.75,
+                            max: 1.50,
+                            onChanged: (v) => applyTuning(
+                              _droneTuning.copyWith(
+                                batteryCapacityMultiplier: v,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              key: const Key('btn_garage_reset'),
+                              onPressed: () => applyTuning(const DroneTuning()),
+                              icon: const Icon(Icons.restore, size: 15),
+                              label: const Text('Restaurar Padrão'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _openAcroSheet() {
@@ -457,6 +719,26 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                   ),
                 ),
                 OutlinedButton.icon(
+                  key: const Key('btn_home_garage'),
+                  onPressed: _openGarageSheet,
+                  icon: const Icon(Icons.build_circle_outlined,
+                      size: 15, color: Colors.cyanAccent),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: Colors.cyanAccent.withOpacity(0.55)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  label: const Text(
+                    'Garagem',
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                OutlinedButton.icon(
                   key: const Key('btn_home_acro_config'),
                   onPressed: _openAcroSheet,
                   icon: const Icon(Icons.tune, size: 15, color: Colors.amberAccent),
@@ -557,14 +839,21 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
       (
         mode: SimulatorMode.freestyle,
         title: 'Freestyle Acro',
-        subtitle: '90s para somar Power Loops, Split-S, Flips 360°, Inverted e Dives.',
+        subtitle: '90s para Power Loops, Split-S, Gaps, Under Bridge e Flips.',
         icon: Icons.cyclone,
         color: Colors.purpleAccent,
+      ),
+      (
+        mode: SimulatorMode.missions,
+        title: 'Missões & Trabalho',
+        subtitle: 'Rotas autônomas, inspeção, pouso em telhado e patrulha NFZ.',
+        icon: Icons.assignment_turned_in,
+        color: Colors.tealAccent,
       ),
     ];
 
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
         borderRadius: BorderRadius.circular(14),
@@ -582,11 +871,11 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
               letterSpacing: 1.0,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Expanded(
             child: ListView.separated(
               itemCount: modes.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 7),
+              separatorBuilder: (_, __) => const SizedBox(height: 5),
               itemBuilder: (context, index) {
                 final item = modes[index];
                 final selected = _selectedMode == item.mode;
@@ -597,7 +886,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 160),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 8),
+                        horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: selected
                           ? item.color.withOpacity(0.16)
@@ -612,8 +901,8 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       children: [
                         Icon(item.icon,
                             color: selected ? item.color : Colors.white54,
-                            size: 20),
-                        const SizedBox(width: 10),
+                            size: 18),
+                        const SizedBox(width: 9),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -623,25 +912,25 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                                 item.title,
                                 style: TextStyle(
                                   color: selected ? item.color : Colors.white,
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               const SizedBox(height: 1),
                               Text(
                                 item.subtitle,
-                                maxLines: 2,
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: Colors.white54,
-                                  fontSize: 10,
+                                  fontSize: 9.5,
                                 ),
                               ),
                             ],
                           ),
                         ),
                         if (selected)
-                          Icon(Icons.check_circle, color: item.color, size: 17),
+                          Icon(Icons.check_circle, color: item.color, size: 16),
                       ],
                     ),
                   ),
@@ -656,7 +945,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
 
   Widget _buildSetupColumn() {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
         borderRadius: BorderRadius.circular(14),
@@ -679,7 +968,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       letterSpacing: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                   Row(
                     children: FlightMap.availableMaps.map((map) {
                       final selected = _selectedMap.id == map.id;
@@ -692,7 +981,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 7),
                   const Text(
                     'DRONE & MODO DE CONTROLE',
                     style: TextStyle(
@@ -702,7 +991,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       letterSpacing: 1.0,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                   Row(
                     children: DroneProfile.all.map((p) {
                       final selected = _selectedProfile.type == p.type;
@@ -714,7 +1003,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       _buildControlModeChip(
@@ -736,6 +1025,89 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                         ),
                     ],
                   ),
+                  if (_selectedMode == SimulatorMode.gateRace ||
+                      _selectedMode == SimulatorMode.timeAttack) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        _variantChip(
+                          key: const Key('course_dir_standard'),
+                          label: 'Padrão',
+                          selected:
+                              _selectedDirection == CourseDirection.standard,
+                          color: Colors.cyanAccent,
+                          onTap: () => setState(() =>
+                              _selectedDirection = CourseDirection.standard),
+                        ),
+                        _variantChip(
+                          key: const Key('course_dir_reverse'),
+                          label: 'Reversa',
+                          selected:
+                              _selectedDirection == CourseDirection.reverse,
+                          color: Colors.cyanAccent,
+                          onTap: () => setState(() =>
+                              _selectedDirection = CourseDirection.reverse),
+                        ),
+                        _variantChip(
+                          key: const Key('course_diff_easy'),
+                          label: 'Fácil',
+                          selected:
+                              _selectedDifficulty == CourseDifficulty.easy,
+                          color: Colors.greenAccent,
+                          onTap: () => setState(() =>
+                              _selectedDifficulty = CourseDifficulty.easy),
+                        ),
+                        _variantChip(
+                          key: const Key('course_diff_medium'),
+                          label: 'Médio',
+                          selected:
+                              _selectedDifficulty == CourseDifficulty.medium,
+                          color: Colors.amberAccent,
+                          onTap: () => setState(() =>
+                              _selectedDifficulty = CourseDifficulty.medium),
+                        ),
+                        _variantChip(
+                          key: const Key('course_diff_pro'),
+                          label: 'Pro',
+                          selected:
+                              _selectedDifficulty == CourseDifficulty.pro,
+                          color: Colors.redAccent,
+                          onTap: () => setState(
+                              () => _selectedDifficulty = CourseDifficulty.pro),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (_selectedMode == SimulatorMode.missions) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children:
+                          AerialMission.forMap(_selectedMap).map((mission) {
+                        final selected = _selectedMissionId == mission.id;
+                        final done = _records
+                            .recordFor(_selectedMap.id)
+                            .completedMissions
+                            .contains(mission.id);
+                        return ChoiceChip(
+                          key: Key('home_mission_${mission.id}'),
+                          avatar: done
+                              ? const Icon(Icons.check_circle,
+                                  size: 14, color: Colors.greenAccent)
+                              : null,
+                          label: Text(mission.name,
+                              style: const TextStyle(fontSize: 10)),
+                          selected: selected,
+                          selectedColor: Colors.tealAccent.withOpacity(0.24),
+                          onSelected: (_) =>
+                              setState(() => _selectedMissionId = mission.id),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -769,12 +1141,33 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
     );
   }
 
+  Widget _variantChip({
+    required Key key,
+    required String label,
+    required bool selected,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ChoiceChip(
+      key: key,
+      label: Text(label, style: const TextStyle(fontSize: 10)),
+      selected: selected,
+      selectedColor: color.withOpacity(0.24),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onSelected: (_) => onTap(),
+    );
+  }
+
   Widget _buildMapCard(FlightMap map, MapRecord rec, bool selected) {
     String recordText;
+    MedalTier medal = MedalTier.none;
     switch (_selectedMode) {
       case SimulatorMode.gateRace:
-        recordText = rec.bestRaceTimeSec != null
-            ? 'Melhor: ${GameHudOverlay.formatTime(rec.bestRaceTimeSec!)}'
+        final profileBest = rec.bestTimeForProfile(_selectedProfile.type.name);
+        medal = rec.medalForProfile(_selectedProfile.type.name);
+        recordText = profileBest != null
+            ? 'Melhor: ${GameHudOverlay.formatTime(profileBest)}'
             : 'Sem recorde';
         break;
       case SimulatorMode.timeAttack:
@@ -783,9 +1176,16 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
             : 'Sem recorde';
         break;
       case SimulatorMode.freestyle:
+        if (rec.freestyleChallengeCompleted) {
+          medal = MedalTier.gold;
+        }
         recordText = rec.bestFreestyleScore > 0
             ? '${rec.bestFreestyleScore.round()} pts'
             : 'Sem recorde';
+        break;
+      case SimulatorMode.missions:
+        final totalMissions = AerialMission.forMap(map).length;
+        recordText = '${rec.completedMissions.length}/$totalMissions missões';
         break;
       case SimulatorMode.freeFlight:
         recordText = 'Raio ${map.radiusMeters.round()}m';
@@ -794,7 +1194,14 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
 
     return InkWell(
       key: Key('home_map_${map.id}'),
-      onTap: () => setState(() => _selectedMap = map),
+      onTap: () => setState(() {
+        _selectedMap = map;
+        final missions = AerialMission.forMap(map);
+        if (_selectedMissionId == null ||
+            !missions.any((m) => m.id == _selectedMissionId)) {
+          _selectedMissionId = missions.first.id;
+        }
+      }),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.all(8),
@@ -827,7 +1234,7 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
                     ),
                   ),
                 ),
-                _medalBadge(rec.medal),
+                _medalBadge(medal),
               ],
             ),
             const SizedBox(height: 3),

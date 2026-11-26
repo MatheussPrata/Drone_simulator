@@ -194,7 +194,12 @@ class RaceManager {
 
     // Passou pelo portal ativo: pontua e avança.
     final speedBonus = (speedKmh * 2.0).roundToDouble().clamp(0.0, 400.0);
-    score += 100.0 * combo + speedBonus;
+    final diffMult = switch (course.difficulty) {
+      CourseDifficulty.easy => 0.9,
+      CourseDifficulty.medium => 1.0,
+      CourseDifficulty.pro => 1.25,
+    };
+    score += (100.0 * combo + speedBonus) * diffMult;
 
     combo = timeSinceLastGate <= comboWindowSeconds
         ? math.min(combo + 1, maxCombo)
@@ -206,7 +211,15 @@ class RaceManager {
     onGatePassed?.call(combo, gatesCleared);
 
     if (timeAttackMode) {
-      final bonusSeconds = (4.5 - gatesCleared * 0.05).clamp(2.6, 4.5);
+      final delta = switch (course.difficulty) {
+        CourseDifficulty.easy => 0.5,
+        CourseDifficulty.medium => 0.0,
+        CourseDifficulty.pro => -0.5,
+      };
+      final minBonus = course.difficulty == CourseDifficulty.medium ? 2.6 : 2.0;
+      final maxBonus = course.difficulty == CourseDifficulty.medium ? 4.5 : 5.5;
+      final bonusSeconds =
+          (4.5 - gatesCleared * 0.05 + delta).clamp(minBonus, maxBonus);
       remainingSeconds =
           math.min(maxTimeAttackSeconds, remainingSeconds + bonusSeconds);
       currentGateIndex = (currentGateIndex + 1) % course.gates.length;

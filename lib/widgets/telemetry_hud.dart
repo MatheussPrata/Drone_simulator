@@ -359,6 +359,7 @@ class TelemetryHud extends StatelessWidget {
       SimulatorMode.gateRace => ('MODO JOGO', Icons.flag, Colors.lightGreenAccent),
       SimulatorMode.timeAttack => ('TIME ATTACK', Icons.timer, Colors.orangeAccent),
       SimulatorMode.freestyle => ('FREESTYLE', Icons.cyclone, Colors.purpleAccent),
+      SimulatorMode.missions => ('MISSÕES', Icons.assignment_turned_in, Colors.tealAccent),
     };
     return Material(
       color: Colors.transparent,

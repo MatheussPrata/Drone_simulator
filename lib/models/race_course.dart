@@ -63,39 +63,81 @@ class RaceGate {
       };
 }
 
+/// Nível de dificuldade do circuito de corrida.
+enum CourseDifficulty { easy, medium, pro }
+
+/// Direção do circuito de corrida.
+enum CourseDirection { standard, reverse }
+
 /// Circuito determinístico de 10 portais para cada cenário.
 class RaceCourse {
   final String mapId;
   final String name;
   final List<RaceGate> gates;
+  final CourseDifficulty difficulty;
+  final CourseDirection direction;
 
   const RaceCourse({
     required this.mapId,
     required this.name,
     required this.gates,
+    this.difficulty = CourseDifficulty.medium,
+    this.direction = CourseDirection.standard,
   });
+
+  String get variantKey => '${difficulty.name}_${direction.name}';
+
+  String get displayName {
+    if (difficulty == CourseDifficulty.medium &&
+        direction == CourseDirection.standard) {
+      return name;
+    }
+    final parts = <String>[name];
+    if (direction == CourseDirection.reverse) {
+      parts.add('Reverso');
+    }
+    if (difficulty == CourseDifficulty.easy) {
+      parts.add('Fácil');
+    } else if (difficulty == CourseDifficulty.pro) {
+      parts.add('Pro');
+    }
+    return parts.join(' · ');
+  }
 
   static final Map<String, RaceCourse> _cache = {};
 
   /// Circuito do mapa, com portais livres de obstáculos e alturas de 8m a 45m.
-  static RaceCourse forMap(FlightMap map) {
-    final cached = _cache[map.id];
+  static RaceCourse forMap(
+    FlightMap map, {
+    CourseDifficulty difficulty = CourseDifficulty.medium,
+    CourseDirection direction = CourseDirection.standard,
+  }) {
+    final key = '${map.id}:${difficulty.name}:${direction.name}';
+    final cached = _cache[key];
     if (cached != null) return cached;
 
     final obstacles = WorldGenerator.generateFor(map);
     final scenario = WorldGenerator.scenarioFor(map);
     final course = switch (scenario) {
-      WorldScenario.urban => _urban(map.id, obstacles),
-      WorldScenario.forest => _forest(map.id, obstacles),
-      WorldScenario.canyon => _canyon(map.id, obstacles),
+      WorldScenario.urban =>
+        _urban(map.id, obstacles, difficulty: difficulty, direction: direction),
+      WorldScenario.forest =>
+        _forest(map.id, obstacles, difficulty: difficulty, direction: direction),
+      WorldScenario.canyon =>
+        _canyon(map.id, obstacles, difficulty: difficulty, direction: direction),
     };
-    _cache[map.id] = course;
+    _cache[key] = course;
     return course;
   }
 
   // ── Distrito Urbano: cruzamento das avenidas, alturas crescentes ──
-  static RaceCourse _urban(String mapId, List<WorldObstacle> obstacles) {
-    final candidates = <(double, double, double)>[
+  static RaceCourse _urban(
+    String mapId,
+    List<WorldObstacle> obstacles, {
+    required CourseDifficulty difficulty,
+    required CourseDirection direction,
+  }) {
+    final baseCandidates = <(double, double, double)>[
       (0, 70, 12),
       (0, 130, 18),
       (0, 190, 26),
@@ -110,13 +152,25 @@ class RaceCourse {
     return RaceCourse(
       mapId: mapId,
       name: 'Circuito do Distrito',
-      gates: _buildGates(candidates, obstacles),
+      difficulty: difficulty,
+      direction: direction,
+      gates: _buildVariantGates(
+        baseCandidates,
+        obstacles,
+        difficulty: difficulty,
+        direction: direction,
+      ),
     );
   }
 
   // ── Parque Florestal: zigue-zague sobre as trilhas ──
-  static RaceCourse _forest(String mapId, List<WorldObstacle> obstacles) {
-    final candidates = <(double, double, double)>[
+  static RaceCourse _forest(
+    String mapId,
+    List<WorldObstacle> obstacles, {
+    required CourseDifficulty difficulty,
+    required CourseDirection direction,
+  }) {
+    final baseCandidates = <(double, double, double)>[
       (0, 60, 10),
       (60, 110, 16),
       (0, 160, 22),
@@ -131,13 +185,25 @@ class RaceCourse {
     return RaceCourse(
       mapId: mapId,
       name: 'Circuito do Bosque',
-      gates: _buildGates(candidates, obstacles),
+      difficulty: difficulty,
+      direction: direction,
+      gates: _buildVariantGates(
+        baseCandidates,
+        obstacles,
+        difficulty: difficulty,
+        direction: direction,
+      ),
     );
   }
 
   // ── Cânion & Represa: travessia sobre a água e pilares ──
-  static RaceCourse _canyon(String mapId, List<WorldObstacle> obstacles) {
-    final candidates = <(double, double, double)>[
+  static RaceCourse _canyon(
+    String mapId,
+    List<WorldObstacle> obstacles, {
+    required CourseDifficulty difficulty,
+    required CourseDirection direction,
+  }) {
+    final baseCandidates = <(double, double, double)>[
       (0, 80, 14),
       (70, 140, 20),
       (140, 200, 28),
@@ -152,21 +218,66 @@ class RaceCourse {
     return RaceCourse(
       mapId: mapId,
       name: 'Circuito da Represa',
-      gates: _buildGates(candidates, obstacles),
+      difficulty: difficulty,
+      direction: direction,
+      gates: _buildVariantGates(
+        baseCandidates,
+        obstacles,
+        difficulty: difficulty,
+        direction: direction,
+      ),
     );
+  }
+
+  static List<RaceGate> _buildVariantGates(
+    List<(double, double, double)> baseCandidates,
+    List<WorldObstacle> obstacles, {
+    required CourseDifficulty difficulty,
+    required CourseDirection direction,
+  }) {
+    final ordered = direction == CourseDirection.reverse
+        ? baseCandidates.reversed.toList()
+        : baseCandidates;
+
+    if (difficulty == CourseDifficulty.medium) {
+      return _buildGates(ordered, obstacles, gateRadius: 4.5);
+    }
+
+    final gateRadius = difficulty == CourseDifficulty.easy ? 6.2 : 3.2;
+    final adjusted = <(double, double, double)>[];
+    for (var i = 0; i < ordered.length; i++) {
+      final (bx, by, bz) = ordered[i];
+      if (difficulty == CourseDifficulty.easy) {
+        adjusted.add((bx, by, (bz + 3.5).clamp(8.0, 45.0)));
+      } else {
+        final slalom = i.isOdd ? 10.0 : 0.0;
+        final sx = bx.abs() < 1e-3 ? bx + slalom : bx;
+        final sy = bx.abs() >= 1e-3 ? by + (i % 4 == 1 ? 10.0 : -10.0) : by;
+        adjusted.add((sx, sy, (bz - 3.0).clamp(8.0, 45.0)));
+      }
+    }
+    return _buildGates(adjusted, obstacles, gateRadius: gateRadius);
   }
 
   /// Constrói os portais elevando o centro acima de qualquer obstáculo.
   static List<RaceGate> _buildGates(
     List<(double, double, double)> candidates,
-    List<WorldObstacle> obstacles,
-  ) {
+    List<WorldObstacle> obstacles, {
+    double gateRadius = 4.5,
+  }) {
+    final clearanceRadius = math.max(6.0, gateRadius + 1.5);
     final gates = <RaceGate>[];
     for (var i = 0; i < candidates.length; i++) {
       final (baseX, baseY, baseZ) = candidates[i];
       var x = baseX;
       var y = baseY;
-      var z = _freeHeight(x, y, baseZ, obstacles);
+      var z = _freeHeight(
+        x,
+        y,
+        baseZ,
+        obstacles,
+        clearanceRadius: clearanceRadius,
+      );
 
       // Se a altura necessária estourar o teto de 45 m, reposiciona o portal
       // sobre a via/trilha mais próxima (eixo livre de construções).
@@ -176,7 +287,13 @@ class RaceCourse {
         } else {
           x = 0.0;
         }
-        z = _freeHeight(x, y, baseZ, obstacles);
+        z = _freeHeight(
+          x,
+          y,
+          baseZ,
+          obstacles,
+          clearanceRadius: clearanceRadius,
+        );
       }
       if (z > 45.0) z = 45.0;
 
@@ -189,6 +306,7 @@ class RaceCourse {
         y: y,
         z: z,
         yawDeg: (yaw + 360.0) % 360.0,
+        radius: gateRadius,
       ));
     }
     return gates;
@@ -199,11 +317,12 @@ class RaceCourse {
     double x,
     double y,
     double baseZ,
-    List<WorldObstacle> obstacles,
-  ) {
+    List<WorldObstacle> obstacles, {
+    double clearanceRadius = 6.0,
+  }) {
     var z = baseZ;
     for (final obstacle in obstacles) {
-      if (!obstacle.collidesAt(x, y, 6.0)) continue;
+      if (!obstacle.collidesAt(x, y, clearanceRadius)) continue;
       final clearance = obstacle.height + 3.0;
       if (clearance > z) z = clearance;
     }
@@ -214,6 +333,9 @@ class RaceCourse {
   String toJsonString() => jsonEncode({
         'mapId': mapId,
         'name': name,
+        'difficulty': difficulty.name,
+        'direction': direction.name,
+        'variantKey': variantKey,
         'gates': gates.map((g) => g.toJson()).toList(),
       });
 }

@@ -47,6 +47,22 @@
   - `flutter analyze --no-fatal-infos --no-fatal-warnings`: 0 erros/avisos.
   - `flutter test`: 175 testes passando (incluindo [block3_controls_and_visuals_test.dart](test/block3_controls_and_visuals_test.dart)).
 
+### Concluído (Bloco 4)
+- **Modo Missões Autônomas / Trabalho Aéreo ([mission_manager.dart](lib/simulation/mission_manager.dart), [simulator_controller.dart](lib/simulation/simulator_controller.dart)):**
+  - Adicionado `SimulatorMode.missions` com `AerialMission.forMap` (convertendo `PresetMission`/`Waypoint` do `FlightMap` além de `tower_inspection`, `roof_precision_landing` e `nfz_safe_patrol` evitando NFZs) e `MissionManager` (hover por checkpoint, pouso de precisão em telhado e falha imediata em invasão de NFZ/Geofence).
+  - Piloto automático no `SimulatorController` com cálculo de altitude segura de cruzeiro (`_safeCruiseAltitudeTo`), transição suave para pouso em telhado e desengate automático ao comando manual (`setManualInput`), mantendo 0 rebuilds a 60 FPS no `FlightSimulatorScreen` e `VirtualJoystick` ([main.dart](lib/main.dart)).
+  - Marcadores 3D (`window.updateMissionState` / `missionGroup`) e seta guia em [index.html](assets/scene3d/index.html) sincronizados via [world_3d_view.dart](lib/widgets/world_3d_view.dart); painel interativo `mission_panel` (`btn_mission_autopilot`) e `mission_failed_card` em [game_hud_overlay.dart](lib/widgets/game_hud_overlay.dart); botão `MISSÕES` em [telemetry_hud.dart](lib/widgets/telemetry_hud.dart); rota/checkpoints no minimapa mantendo camadas únicas ([mini_map_widget.dart](lib/widgets/mini_map_widget.dart)); seta de borda no OSD ([fpv_osd_overlay.dart](lib/widgets/fpv_osd_overlay.dart)) e suporte no reset do gamepad ([gamepad_service.dart](lib/services/gamepad_service.dart)).
+- **Circuitos Variados ([race_course.dart](lib/models/race_course.dart), [race_manager.dart](lib/simulation/race_manager.dart)):**
+  - Adicionados `CourseDifficulty` (`easy`, `medium`, `pro`) e `CourseDirection` (`standard`, `reverse`) em `RaceCourse.forMap`, com multiplicadores de pontuação/tempo no `RaceManager` e reconstrução 3D por `variantKey` no `World3dView`.
+- **Freestyle 2.0 ([freestyle_manager.dart](lib/simulation/freestyle_manager.dart)):**
+  - Adicionadas detecções de `UNDER BRIDGE` (360 pts) e `GAP THREAD` (320 pts) via cálculo geométrico em `SimulatorController._resolveWorldCollisions`, além de `FreestyleChallenge` por mapa com indicador `freestyle_challenge_pill` no `GameHudOverlay`.
+- **Garagem / Tuning & Recorde/Ghost por Perfil ([drone_profile.dart](lib/models/drone_profile.dart), [quadrotor_physics_6dof.dart](lib/simulation/quadrotor_physics_6dof.dart), [records_repository.dart](lib/services/records_repository.dart)):**
+  - Criada `DroneTuning` (cores LED/braços, FOV base 55°–105°, peso e bateria) aplicada em `QuadrotorPhysicsEngine.paramsForProfile`, persistida em `drone_simulator_tuning_v1` e aplicada ao 3D via `window.setDroneAppearance` e `baseFovDeg`.
+  - `MapRecord` e `RecordsRepository` agora isolam recordes, medalhas e `GhostTrajectory` por perfil (`bestTimeForProfile`, `medalForProfile`, `ghostTrajectoryForProfile`, `ghostFramesByProfile`), além de persistir `completedMissions` e `freestyleChallengeCompleted`.
+  - Menus pré-voo e em voo atualizados em [home_menu_screen.dart](lib/ui/screens/home_menu_screen.dart) e [map_settings_modal.dart](lib/widgets/map_settings_modal.dart) sem overflow em `640x360`.
+- **Validação:**
+  - `flutter analyze --no-fatal-infos --no-fatal-warnings`: `No issues found!`.
+  - `flutter test`: **187 testes passando** (incluindo [block4_modes_and_garage_test.dart](test/block4_modes_and_garage_test.dart)).
+
 ### Próximo Passo Pendente
-- **Bloco 2 (complemento opcional):** Recorde e Ghost independentes por perfil de drone (`Mini 249g` vs `FPV Racer`).
 - **Limpeza opcional:** Avaliar remoção/unificação da árvore legada (`lib/ui/screens/simulator_screen.dart`, `lib/providers/simulation_provider.dart`, `lib/ui/widgets/`).

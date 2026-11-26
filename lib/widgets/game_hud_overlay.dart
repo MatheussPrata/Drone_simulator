@@ -7,7 +7,7 @@ import 'package:drone_simulator/simulation/freestyle_manager.dart';
 import 'package:drone_simulator/simulation/race_manager.dart';
 import 'package:drone_simulator/simulation/simulator_controller.dart';
 
-/// HUD do Modo Jogo (Corrida, Time Attack, Freestyle) + cards de queda, vitória e replay.
+/// HUD do Modo Jogo (Corrida, Time Attack, Freestyle, Missões) + cards de queda, vitória e replay.
 class GameHudOverlay extends StatelessWidget {
   final SimulatorController controller;
   final VoidCallback? onOpenHomeMenu;
@@ -33,13 +33,18 @@ class GameHudOverlay extends StatelessWidget {
       builder: (context, _) {
         final isRace = controller.isRaceMode;
         final isFreestyle = controller.isFreestyle;
+        final isMission = controller.isMissionMode;
         final raceStatus = controller.raceStatus;
         final freestyle = controller.freestyleManager;
+        final mission = controller.missionManager;
         final replaying = controller.isReplaying;
         final crashed = !replaying && controller.isCrashed;
+        final missionFailed =
+            !replaying && !crashed && isMission && (mission?.isFailed ?? false);
         final finished = !replaying &&
             ((isRace && raceStatus == RaceStatus.finished) ||
-                (isFreestyle && (freestyle?.isFinished ?? false)));
+                (isFreestyle && (freestyle?.isFinished ?? false)) ||
+                (isMission && (mission?.isCompleted ?? false)));
 
         return Stack(
           children: [
@@ -71,11 +76,32 @@ class GameHudOverlay extends StatelessWidget {
                   ),
                 ),
               ),
+            if (isMission &&
+                mission != null &&
+                !replaying &&
+                !crashed &&
+                !missionFailed &&
+                !finished)
+              Positioned(
+                top: 74,
+                left: 8,
+                right: 8,
+                child: Center(
+                  child: _buildMissionPanel(mission),
+                ),
+              ),
             if (crashed)
               Center(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: _buildCrashCard(context),
+                ),
+              ),
+            if (missionFailed && mission != null)
+              Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: _buildMissionFailedCard(context, mission),
                 ),
               ),
             if (finished)
@@ -281,7 +307,7 @@ class GameHudOverlay extends StatelessWidget {
           Text(
             isTimeAttack
                 ? 'TIME ATTACK · ${controller.activeMap.name.toUpperCase()}'
-                : '${controller.raceCourse?.name ?? 'CORRIDA'} · '
+                : '${controller.raceCourse?.displayName ?? 'CORRIDA'} · '
                     '${controller.activeMap.name.toUpperCase()}',
             style: const TextStyle(
               color: Colors.white54,
@@ -332,6 +358,7 @@ class GameHudOverlay extends StatelessWidget {
   Widget _buildFreestylePanel(FreestyleManager fs) {
     final showTrickBanner =
         fs.lastTrickLabel != null && fs.lastTrickAgeSec < 2.2;
+    final challenge = fs.challenge;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -360,6 +387,41 @@ class GameHudOverlay extends StatelessWidget {
             ],
           ),
         ),
+        if (challenge != null) ...[
+          const SizedBox(height: 5),
+          Container(
+            key: const Key('freestyle_challenge_pill'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.72),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: fs.challengeCompleted
+                    ? Colors.greenAccent
+                    : (challenge.requireNoCrash && fs.hadCrash
+                        ? Colors.redAccent
+                        : Colors.purpleAccent.withOpacity(0.7)),
+              ),
+            ),
+            child: Text(
+              fs.challengeCompleted
+                  ? 'DESAFIO CONCLUÍDO! (${challenge.title})'
+                  : (challenge.requireNoCrash && fs.hadCrash
+                      ? 'DESAFIO FALHOU · QUEDA REGISTRADA'
+                      : 'META: ${fs.score.round()}/${challenge.targetScore.round()} pts · '
+                          '${fs.trickBreakdown.length}/${challenge.minDistinctTricks} manobras'),
+              style: TextStyle(
+                color: fs.challengeCompleted
+                    ? Colors.greenAccent
+                    : (challenge.requireNoCrash && fs.hadCrash
+                        ? Colors.redAccent
+                        : Colors.white70),
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
         if (showTrickBanner) ...[
           const SizedBox(height: 6),
           Container(
@@ -382,6 +444,98 @@ class GameHudOverlay extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildMissionPanel(MissionManager mm) {
+    final cp = mm.activeCheckpoint;
+    final cpNumber =
+        (mm.currentCheckpointIndex + 1).clamp(1, math.max(1, mm.totalCheckpoints));
+    final dist = cp != null
+        ? mm.distanceToActiveCheckpoint(controller.x, controller.y, controller.z)
+        : 0.0;
+    final auto = mm.autopilotEnabled;
+
+    return Container(
+      key: const Key('mission_panel'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.76),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.tealAccent.withOpacity(0.65)),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  mm.mission.name.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.tealAccent,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.7,
+                  ),
+                ),
+                Text(
+                  cp == null
+                      ? 'Concluída'
+                      : (cp.requireLanding
+                          ? '${cp.label} (pouse no alvo)'
+                          : cp.requiredHoverSec > 0.0
+                              ? '${cp.label} · HOLD ${(mm.hoverProgressFraction * 100).round()}%'
+                              : cp.label),
+                  style: const TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+              ],
+            ),
+            const SizedBox(width: 10),
+            _divider(),
+            _metric('ALVO', '$cpNumber/${mm.totalCheckpoints}', Colors.tealAccent),
+            _divider(),
+            _metric('DIST', '${dist.toStringAsFixed(0)} m', Colors.greenAccent),
+            _divider(),
+            _metric('TEMPO', formatTime(mm.elapsedSeconds), Colors.white),
+            const SizedBox(width: 8),
+            if (mm.mission.supportsAutopilot)
+              OutlinedButton.icon(
+                key: const Key('btn_mission_autopilot'),
+                onPressed: controller.toggleMissionAutopilot,
+                icon: Icon(
+                  auto ? Icons.smart_toy : Icons.sports_esports,
+                  size: 14,
+                  color: auto ? Colors.tealAccent : Colors.white70,
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: auto ? Colors.tealAccent : Colors.white70,
+                  side: BorderSide(
+                    color: auto
+                        ? Colors.tealAccent
+                        : Colors.white24,
+                  ),
+                  backgroundColor: auto
+                      ? Colors.tealAccent.withOpacity(0.16)
+                      : Colors.transparent,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                label: Text(
+                  auto ? 'AUTO ON' : 'AUTO OFF',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -460,7 +614,9 @@ class GameHudOverlay extends StatelessWidget {
             child: ElevatedButton.icon(
               key: const Key('btn_restart_flight'),
               onPressed: () {
-                if (controller.isRaceMode || controller.isFreestyle) {
+                if (controller.isRaceMode ||
+                    controller.isFreestyle ||
+                    controller.isMissionMode) {
                   controller.restartRace();
                 } else {
                   controller.respawn();
@@ -493,18 +649,89 @@ class GameHudOverlay extends StatelessWidget {
     );
   }
 
+  Widget _buildMissionFailedCard(BuildContext context, MissionManager mm) {
+    return Container(
+      key: const Key('mission_failed_card'),
+      width: 350,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF281210).withOpacity(0.94),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orangeAccent, width: 2),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 24, spreadRadius: 4),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.gpp_bad, color: Colors.orangeAccent, size: 40),
+          const SizedBox(height: 8),
+          const Text(
+            'MISSÃO INTERROMPIDA',
+            style: TextStyle(
+              color: Colors.orangeAccent,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            mm.failureReason ?? 'Falha nos critérios da missão.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              key: const Key('btn_restart_mission'),
+              onPressed: controller.restartRace,
+              icon: const Icon(Icons.refresh),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orangeAccent.shade700,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              label: const Text(
+                'REINICIAR MISSÃO',
+                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
+              ),
+            ),
+          ),
+          if (onOpenHomeMenu != null) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: onOpenHomeMenu,
+              child: const Text('VOLTAR AO MENU INICIAL',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildFinishCard(BuildContext context) {
     final isTimeAttack = controller.isTimeAttack;
     final isFreestyle = controller.isFreestyle;
+    final isMission = controller.isMissionMode;
     final fs = controller.freestyleManager;
+    final mm = controller.missionManager;
     final best = controller.raceBestTime;
-    final medal = isTimeAttack || isFreestyle
+    final medal = isTimeAttack || isFreestyle || isMission
         ? MedalTier.none
         : medalForRaceTime(controller.raceElapsedSeconds);
 
     final title = isTimeAttack
         ? 'TIME ATTACK ENCERRADO!'
-        : (isFreestyle ? 'FREESTYLE CONCLUÍDO!' : 'CIRCUITO CONCLUÍDO!');
+        : (isFreestyle
+            ? 'FREESTYLE CONCLUÍDO!'
+            : (isMission ? 'MISSÃO CONCLUÍDA!' : 'CIRCUITO CONCLUÍDO!'));
 
     return Container(
       key: const Key('race_finish_card'),
@@ -552,7 +779,17 @@ class GameHudOverlay extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 12),
-          if (isTimeAttack) ...[
+          if (isMission && mm != null) ...[
+            Text(
+              'Missão: ${mm.mission.name}',
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tempo: ${formatTime(mm.elapsedSeconds)} · Pontuação: ${mm.score.round()} pts',
+              style: const TextStyle(color: Colors.amberAccent, fontSize: 14),
+            ),
+          ] else if (isTimeAttack) ...[
             Text(
               'Portais cruzados: ${controller.raceGatesCleared}',
               style: const TextStyle(color: Colors.white, fontSize: 15),
@@ -572,6 +809,18 @@ class GameHudOverlay extends StatelessWidget {
               'Pontuação: ${fs.score.round()} pts · Melhor Combo x${fs.bestCombo}',
               style: const TextStyle(color: Colors.amberAccent, fontSize: 14),
             ),
+            if (fs.challenge != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                fs.challengeCompleted
+                    ? 'Desafio concluído: ${fs.challenge!.title}'
+                    : 'Desafio pendente: ${fs.challenge!.title}',
+                style: TextStyle(
+                  color: fs.challengeCompleted ? Colors.greenAccent : Colors.white70,
+                  fontSize: 12.5,
+                ),
+              ),
+            ],
           ] else ...[
             Text(
               'Tempo: ${formatTime(controller.raceElapsedSeconds)}',
@@ -595,7 +844,7 @@ class GameHudOverlay extends StatelessWidget {
             if (best != null) ...[
               const SizedBox(height: 4),
               Text(
-                'Recorde: ${formatTime(best)}',
+                'Recorde (${controller.activeProfile.name}): ${formatTime(best)}',
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ],

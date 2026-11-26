@@ -467,6 +467,84 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
       }
     }
 
+    // Checkpoints e rota de missão (Modo Missões & Trabalho Aéreo)
+    final activeMission =
+        (ctrl != null && ctrl.isMissionMode) ? ctrl.activeMission : null;
+    final missionManager =
+        (ctrl != null && ctrl.isMissionMode) ? ctrl.missionManager : null;
+    final missionCircles = <CircleMarker>[];
+    final missionMarkers = <Marker>[];
+    if (activeMission != null && activeMission.checkpoints.isNotEmpty) {
+      final activeIndex = missionManager?.currentCheckpointIndex ?? 0;
+      final missionPoints = activeMission.checkpoints
+          .map((c) => FlightMap.metersToLatLng(c.x, c.y, activeMap.center))
+          .toList();
+      if (missionPoints.length >= 2) {
+        polylines.add(Polyline(
+          points: missionPoints,
+          color: Colors.tealAccent.withOpacity(0.45),
+          strokeWidth: 1.6,
+        ));
+      }
+      if (activeIndex < activeMission.checkpoints.length) {
+        final activeCp = activeMission.checkpoints[activeIndex];
+        polylines.add(Polyline(
+          points: [
+            dronePosition,
+            FlightMap.metersToLatLng(activeCp.x, activeCp.y, activeMap.center),
+          ],
+          color: Colors.amberAccent,
+          strokeWidth: 2.2,
+          isDotted: true,
+        ));
+      }
+      for (var i = 0; i < activeMission.checkpoints.length; i++) {
+        final cp = activeMission.checkpoints[i];
+        final isActive = i == activeIndex;
+        final isDone = i < activeIndex;
+        final cpColor = cp.requireLanding
+            ? Colors.greenAccent
+            : (isActive
+                ? Colors.amberAccent
+                : (isDone ? Colors.white38 : Colors.tealAccent));
+        final pos = FlightMap.metersToLatLng(cp.x, cp.y, activeMap.center);
+        missionCircles.add(CircleMarker(
+          point: pos,
+          radius: isActive ? cp.captureRadius * 1.25 : cp.captureRadius,
+          useRadiusInMeter: true,
+          color: cpColor.withOpacity(isActive ? 0.30 : 0.12),
+          borderColor: cpColor,
+          borderStrokeWidth: isActive ? 2.2 : 1.0,
+        ));
+        if (isActive || cp.requireLanding || widget.showControls) {
+          missionMarkers.add(Marker(
+            point: pos,
+            width: isActive ? 26 : 20,
+            height: isActive ? 26 : 20,
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isActive ? cpColor : Colors.black87,
+                border: Border.all(
+                  color: isActive ? Colors.black : cpColor,
+                  width: 1.2,
+                ),
+              ),
+              child: Text(
+                cp.requireLanding ? 'P' : 'W${i + 1}',
+                style: TextStyle(
+                  color: isActive ? Colors.black : cpColor,
+                  fontSize: isActive ? 9 : 7.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ));
+        }
+      }
+    }
+
     final ghost = ctrl?.currentGhostFrame;
 
     final Widget mapContent = Stack(
@@ -572,6 +650,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                 ),
                 ...obstacleCircles,
                 ...gateCircles,
+                ...missionCircles,
                 CircleMarker(
                   point: activeMap.homePosition,
                   radius: 14.0,
@@ -655,6 +734,7 @@ class _MiniMapWidgetState extends State<MiniMapWidget> {
                     ),
                   ),
                 ...gateMarkers,
+                ...missionMarkers,
                 if (ghost != null)
                   Marker(
                     point: FlightMap.metersToLatLng(

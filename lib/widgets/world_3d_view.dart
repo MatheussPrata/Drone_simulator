@@ -29,9 +29,14 @@ class _World3dViewState extends State<World3dView> {
   bool _isSending = false;
   String? _loadedScenarioId;
   String? _lastRaceMapId;
+  String? _lastRaceVariantKey;
   int _lastRaceGateIndex = -1;
   String? _lastRaceMode;
   bool _racePushed = false;
+  String? _lastMissionId;
+  int _lastMissionIndex = -1;
+  bool _missionPushed = false;
+  DroneTuning? _lastDroneTuning;
   TimeOfDayPreset? _lastLightingPreset;
 
   @override
@@ -67,6 +72,7 @@ class _World3dViewState extends State<World3dView> {
               });
               _pushObstacleLayout();
               _pushLightingPreset();
+              _pushDroneAppearance();
               _syncStateTo3d();
             }
           },
@@ -119,6 +125,23 @@ class _World3dViewState extends State<World3dView> {
     }
   }
 
+  /// Envia aparência da garagem (LEDs, braços e FOV base) quando mudar.
+  void _pushDroneAppearance() {
+    if (_webViewController == null) return;
+    final tuning = widget.controller.droneTuning;
+    if (_lastDroneTuning == tuning) return;
+    _lastDroneTuning = tuning;
+
+    final payload =
+        '{"ledColor":"${tuning.ledColorHex}","armColor":"${tuning.armColorHex}",'
+        '"baseFov":${tuning.cameraFovDeg.toStringAsFixed(1)}}';
+    _webViewController!
+        .runJavaScript("window.setDroneAppearance('$payload');")
+        .catchError((Object error) {
+      debugPrint('Erro ao enviar aparência do drone ao WebView: $error');
+    });
+  }
+
   /// Envia o circuito de portais e o índice ativo para a cena 3D.
   void _pushRaceState() {
     final controller = widget.controller;
@@ -129,6 +152,7 @@ class _World3dViewState extends State<World3dView> {
       if (_racePushed) {
         _racePushed = false;
         _lastRaceMapId = null;
+        _lastRaceVariantKey = null;
         _lastRaceGateIndex = -1;
         _lastRaceMode = null;
         _webViewController!
@@ -141,8 +165,10 @@ class _World3dViewState extends State<World3dView> {
     }
 
     final index = controller.raceGateIndex;
+    final variantKey = course.variantKey;
     if (_racePushed &&
         _lastRaceMapId == course.mapId &&
+        _lastRaceVariantKey == variantKey &&
         _lastRaceGateIndex == index &&
         _lastRaceMode == modeName) {
       return;
@@ -150,6 +176,7 @@ class _World3dViewState extends State<World3dView> {
 
     _racePushed = true;
     _lastRaceMapId = course.mapId;
+    _lastRaceVariantKey = variantKey;
     _lastRaceGateIndex = index;
     _lastRaceMode = modeName;
 
@@ -161,6 +188,47 @@ class _World3dViewState extends State<World3dView> {
         .runJavaScript("window.updateRaceState('$body');")
         .catchError((Object error) {
       debugPrint('Erro ao enviar circuito ao WebView: $error');
+    });
+  }
+
+  /// Envia checkpoints da missão ativa para renderização 3D.
+  void _pushMissionState() {
+    if (_webViewController == null) return;
+    final controller = widget.controller;
+    final mission = controller.activeMission;
+    final manager = controller.missionManager;
+
+    if (!controller.isMissionMode || mission == null || manager == null) {
+      if (_missionPushed) {
+        _missionPushed = false;
+        _lastMissionId = null;
+        _lastMissionIndex = -1;
+        _webViewController!
+            .runJavaScript("window.updateMissionState('{\"active\":false}');")
+            .catchError((Object error) {
+          debugPrint('Erro ao limpar missão no WebView: $error');
+        });
+      }
+      return;
+    }
+
+    final activeIndex = manager.currentCheckpointIndex;
+    if (_missionPushed &&
+        _lastMissionId == mission.id &&
+        _lastMissionIndex == activeIndex) {
+      return;
+    }
+
+    _missionPushed = true;
+    _lastMissionId = mission.id;
+    _lastMissionIndex = activeIndex;
+    final json = mission
+        .toJsonString(activeIndex: activeIndex, active: true)
+        .replaceAll("'", "\\'");
+    _webViewController!
+        .runJavaScript("window.updateMissionState('$json');")
+        .catchError((Object error) {
+      debugPrint('Erro ao enviar missão ao WebView: $error');
     });
   }
 
@@ -220,6 +288,7 @@ class _World3dViewState extends State<World3dView> {
         '"gimbalPitch":${s.gimbalPitch.toStringAsFixed(2)},"cameraMode":"$cameraModeStr",'
         '"flightMode":"${s.flightMode.name}",'
         '"fpvUptiltDeg":${s.fpvUptiltDeg.toStringAsFixed(1)},'
+        '"baseFovDeg":${s.droneTuning.cameraFovDeg.toStringAsFixed(1)},'
         '"audioEnabled":$audioOn,'
         '"speedKmh":${s.speedKmh.toStringAsFixed(1)},'
         '"ghost":$ghostJson,'
@@ -235,7 +304,9 @@ class _World3dViewState extends State<World3dView> {
 
     _pushObstacleLayout();
     _pushLightingPreset();
+    _pushDroneAppearance();
     _pushRaceState();
+    _pushMissionState();
     _pushSoundEvents();
 
     if (_isSending) return;

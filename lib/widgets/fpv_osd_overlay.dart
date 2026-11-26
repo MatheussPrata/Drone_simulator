@@ -163,6 +163,9 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
     final curAgl = ctrl != null ? ctrl.altitudeAgl : widget.altitudeAgl;
     final activeGate =
         (ctrl != null && ctrl.isRaceMode) ? ctrl.raceManager?.activeGate : null;
+    final activeCheckpoint = (ctrl != null && ctrl.isMissionMode)
+        ? ctrl.missionManager?.activeCheckpoint
+        : null;
     final curX = ctrl != null ? ctrl.x : widget.droneX;
     final curY = ctrl != null ? ctrl.y : widget.droneY;
     final curZ = ctrl != null ? ctrl.z : widget.droneZ;
@@ -181,11 +184,15 @@ class _FpvOsdOverlayState extends State<FpvOsdOverlay> {
           fpvUptiltDeg: curUptilt,
           verticalSpeedMs: curVerticalSpeed,
           altitudeAgl: curAgl,
-          nextGateX: activeGate?.x ?? widget.nextGateX,
-          nextGateY: activeGate?.y ?? widget.nextGateY,
-          nextGateZ: activeGate?.z ?? widget.nextGateZ,
-          nextGateNumber:
-              activeGate != null ? (ctrl!.raceGateIndex + 1) : widget.nextGateNumber,
+          nextGateX: activeGate?.x ?? activeCheckpoint?.x ?? widget.nextGateX,
+          nextGateY: activeGate?.y ?? activeCheckpoint?.y ?? widget.nextGateY,
+          nextGateZ: activeGate?.z ?? activeCheckpoint?.z ?? widget.nextGateZ,
+          nextGateNumber: activeGate != null
+              ? (ctrl!.raceGateIndex + 1)
+              : (activeCheckpoint != null
+                  ? (activeCheckpoint.index + 1)
+                  : widget.nextGateNumber),
+          nextTargetPrefix: activeCheckpoint != null ? 'W' : 'G',
           droneX: curX,
           droneY: curY,
           droneZ: curZ,
@@ -213,6 +220,7 @@ class FpvOsdPainter extends CustomPainter {
   final double? nextGateY;
   final double? nextGateZ;
   final int? nextGateNumber;
+  final String nextTargetPrefix;
   final double droneX;
   final double droneY;
   final double droneZ;
@@ -234,6 +242,7 @@ class FpvOsdPainter extends CustomPainter {
     this.nextGateY,
     this.nextGateZ,
     this.nextGateNumber,
+    this.nextTargetPrefix = 'G',
     required this.droneX,
     required this.droneY,
     required this.droneZ,
@@ -724,7 +733,7 @@ class FpvOsdPainter extends CustomPainter {
     arrowPath.close();
     canvas.drawPath(arrowPath, gateGlowPaint);
 
-    final label = 'G${nextGateNumber ?? ''} ${dist.toStringAsFixed(0)}m';
+    final label = '$nextTargetPrefix${nextGateNumber ?? ''} ${dist.toStringAsFixed(0)}m';
     final tp = TextPainter(
       text: TextSpan(
         text: label,
@@ -770,6 +779,7 @@ class FpvOsdPainter extends CustomPainter {
         oldDelegate.nextGateY != nextGateY ||
         oldDelegate.nextGateZ != nextGateZ ||
         oldDelegate.nextGateNumber != nextGateNumber ||
+        oldDelegate.nextTargetPrefix != nextTargetPrefix ||
         oldDelegate.droneX != droneX ||
         oldDelegate.droneY != droneY ||
         oldDelegate.droneZ != droneZ ||

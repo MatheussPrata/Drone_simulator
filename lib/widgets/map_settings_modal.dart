@@ -169,8 +169,105 @@ class MapSettingsModal extends StatelessWidget {
                       _modeChip('Corrida 10 Portais', SimulatorMode.gateRace),
                       _modeChip('Time Attack', SimulatorMode.timeAttack),
                       _modeChip('Freestyle Acro', SimulatorMode.freestyle),
+                      _modeChip('Missões', SimulatorMode.missions),
                     ],
                   ),
+                  if (controller.isRaceMode) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        ChoiceChip(
+                          key: const Key('modal_course_dir_standard'),
+                          label: const Text('Pista Padrão',
+                              style: TextStyle(fontSize: 10.5)),
+                          selected: controller.courseDirection ==
+                              CourseDirection.standard,
+                          selectedColor: Colors.cyanAccent.withOpacity(0.24),
+                          onSelected: (_) => controller.setCourseVariant(
+                            direction: CourseDirection.standard,
+                          ),
+                        ),
+                        ChoiceChip(
+                          key: const Key('modal_course_dir_reverse'),
+                          label: const Text('Reversa',
+                              style: TextStyle(fontSize: 10.5)),
+                          selected: controller.courseDirection ==
+                              CourseDirection.reverse,
+                          selectedColor: Colors.cyanAccent.withOpacity(0.24),
+                          onSelected: (_) => controller.setCourseVariant(
+                            direction: CourseDirection.reverse,
+                          ),
+                        ),
+                        ChoiceChip(
+                          key: const Key('modal_course_diff_easy'),
+                          label: const Text('Fácil',
+                              style: TextStyle(fontSize: 10.5)),
+                          selected: controller.courseDifficulty ==
+                              CourseDifficulty.easy,
+                          selectedColor: Colors.greenAccent.withOpacity(0.24),
+                          onSelected: (_) => controller.setCourseVariant(
+                            difficulty: CourseDifficulty.easy,
+                          ),
+                        ),
+                        ChoiceChip(
+                          key: const Key('modal_course_diff_medium'),
+                          label: const Text('Médio',
+                              style: TextStyle(fontSize: 10.5)),
+                          selected: controller.courseDifficulty ==
+                              CourseDifficulty.medium,
+                          selectedColor: Colors.amberAccent.withOpacity(0.24),
+                          onSelected: (_) => controller.setCourseVariant(
+                            difficulty: CourseDifficulty.medium,
+                          ),
+                        ),
+                        ChoiceChip(
+                          key: const Key('modal_course_diff_pro'),
+                          label: const Text('Pro',
+                              style: TextStyle(fontSize: 10.5)),
+                          selected: controller.courseDifficulty ==
+                              CourseDifficulty.pro,
+                          selectedColor: Colors.redAccent.withOpacity(0.24),
+                          onSelected: (_) => controller.setCourseVariant(
+                            difficulty: CourseDifficulty.pro,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (controller.isMissionMode) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: controller.availableMissionsForActiveMap
+                          .map((mission) {
+                        final selected =
+                            controller.activeMission?.id == mission.id;
+                        return ChoiceChip(
+                          key: Key('modal_mission_${mission.id}'),
+                          label: Text(mission.name,
+                              style: const TextStyle(fontSize: 10.5)),
+                          selected: selected,
+                          selectedColor: Colors.tealAccent.withOpacity(0.25),
+                          onSelected: (_) => controller.selectMission(mission),
+                        );
+                      }).toList(),
+                    ),
+                    SwitchListTile(
+                      key: const Key('modal_mission_autopilot_switch'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Piloto Automático da Missão',
+                        style: TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                      value: controller.isMissionAutopilotActive,
+                      activeColor: Colors.tealAccent,
+                      onChanged: controller.setMissionAutopilot,
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -358,6 +455,78 @@ class MapSettingsModal extends StatelessWidget {
                       controller.setAudioEnabled(v);
                       controller.setHapticsEnabled(v);
                     },
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'GARAGEM (LEDS & FOV FPV)',
+                    style: TextStyle(
+                      color: Colors.cyanAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      for (var i = 0; i < DroneTuning.ledPalette.length; i++)
+                        GestureDetector(
+                          key: Key('modal_garage_led_$i'),
+                          onTap: () => controller.setDroneTuning(
+                            controller.droneTuning.copyWith(
+                              ledColorHex: DroneTuning.ledPalette[i],
+                            ),
+                          ),
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(
+                                int.parse(
+                                  'FF${DroneTuning.ledPalette[i].substring(1)}',
+                                  radix: 16,
+                                ),
+                              ),
+                              border: Border.all(
+                                color: controller.droneTuning.ledColorHex ==
+                                        DroneTuning.ledPalette[i]
+                                    ? Colors.white
+                                    : Colors.white24,
+                                width: controller.droneTuning.ledColorHex ==
+                                        DroneTuning.ledPalette[i]
+                                    ? 2.2
+                                    : 1.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          'FOV 3D: ${controller.droneTuning.cameraFovDeg.round()}°',
+                          style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                        ),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          key: const Key('modal_garage_fov_slider'),
+                          value: controller.droneTuning.cameraFovDeg.clamp(55.0, 105.0),
+                          min: 55.0,
+                          max: 105.0,
+                          activeColor: Colors.cyanAccent,
+                          onChanged: (v) => controller.setDroneTuning(
+                            controller.droneTuning.copyWith(cameraFovDeg: v),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -131,7 +131,9 @@ class GamepadInputBridge {
         controller.toggleCameraMode();
         break;
       case 'reset':
-        if (controller.isRaceMode || controller.isFreestyle) {
+        if (controller.isRaceMode ||
+            controller.isFreestyle ||
+            controller.isMissionMode) {
           controller.restartRace();
         } else {
           controller.reset();

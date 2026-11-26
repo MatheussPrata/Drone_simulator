@@ -501,12 +501,17 @@ class QuadrotorPhysicsEngine {
     this.turbulenceIntensity = 1.0,
   });
 
-  static DronePhysicsParams paramsForProfile(DroneProfile profile) {
+  static DronePhysicsParams paramsForProfile(
+    DroneProfile profile, {
+    DroneTuning? tuning,
+  }) {
+    final DronePhysicsParams base;
     switch (profile.type) {
       case DroneProfileType.mini249g:
-        return const DronePhysicsParams();
+        base = const DronePhysicsParams();
+        break;
       case DroneProfileType.proCine900g:
-        return const DronePhysicsParams(
+        base = const DronePhysicsParams(
           massKg: 1.65,
           maxTotalThrustN: 42.0,
           motorTimeConstantSec: 0.038,
@@ -514,8 +519,9 @@ class QuadrotorPhysicsEngine {
           dragAreaCdA: Vec3(0.065, 0.065, 0.145),
           batteryCapacityWh: 62.0,
         );
+        break;
       case DroneProfileType.fpvRacer:
-        return const DronePhysicsParams(
+        base = const DronePhysicsParams(
           massKg: 0.85,
           maxTotalThrustN: 44.0,
           motorTimeConstantSec: 0.018,
@@ -523,7 +529,29 @@ class QuadrotorPhysicsEngine {
           dragAreaCdA: Vec3(0.038, 0.038, 0.090),
           batteryCapacityWh: 28.0,
         );
+        break;
     }
+
+    if (tuning == null) return base;
+    final w = tuning.weightMultiplier.clamp(0.80, 1.30);
+    final b = tuning.batteryCapacityMultiplier.clamp(0.75, 1.50);
+    return DronePhysicsParams(
+      massKg: base.massKg * w,
+      gravity: base.gravity,
+      armLengthM: base.armLengthM,
+      rotorRadiusM: base.rotorRadiusM,
+      inertia: base.inertia * w,
+      rotorInertia: base.rotorInertia,
+      maxMotorRadPerSec: base.maxMotorRadPerSec,
+      maxTotalThrustN: base.maxTotalThrustN,
+      torqueToThrustRatio: base.torqueToThrustRatio,
+      motorTimeConstantSec: base.motorTimeConstantSec,
+      dragAreaCdA: base.dragAreaCdA,
+      bladeFlappingDrag: base.bladeFlappingDrag,
+      angularDamping: base.angularDamping,
+      airDensitySeaLevel: base.airDensitySeaLevel,
+      batteryCapacityWh: base.batteryCapacityWh * b,
+    );
   }
 
   void updateParams(DronePhysicsParams newParams) {

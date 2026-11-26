@@ -62,6 +62,11 @@ class FlightSimulatorScreen extends StatefulWidget {
   final FlightControlMode initialFlightMode;
   final TimeOfDayPreset initialTimeOfDay;
   final AcroSettings? initialAcroSettings;
+  final CourseDifficulty initialCourseDifficulty;
+  final CourseDirection initialCourseDirection;
+  final String? initialMissionId;
+  final bool initialMissionAutopilot;
+  final DroneTuning? initialDroneTuning;
   final bool initialAudioEnabled;
   final bool initialHapticsEnabled;
   final bool initialGhostEnabled;
@@ -75,6 +80,11 @@ class FlightSimulatorScreen extends StatefulWidget {
     this.initialFlightMode = FlightControlMode.stabilized,
     this.initialTimeOfDay = TimeOfDayPreset.day,
     this.initialAcroSettings,
+    this.initialCourseDifficulty = CourseDifficulty.medium,
+    this.initialCourseDirection = CourseDirection.standard,
+    this.initialMissionId,
+    this.initialMissionAutopilot = false,
+    this.initialDroneTuning,
     this.initialAudioEnabled = true,
     this.initialHapticsEnabled = true,
     this.initialGhostEnabled = true,
@@ -106,6 +116,9 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
     if (widget.initialAcroSettings != null) {
       _controller.setAcroSettings(widget.initialAcroSettings!, persist: false);
     }
+    if (widget.initialDroneTuning != null) {
+      _controller.setDroneTuning(widget.initialDroneTuning!, persist: false);
+    }
     _controller.setAudioEnabled(widget.initialAudioEnabled);
     _controller.setHapticsEnabled(widget.initialHapticsEnabled);
     _controller.setGhostEnabled(widget.initialGhostEnabled);
@@ -114,13 +127,21 @@ class _FlightSimulatorScreenState extends State<FlightSimulatorScreen> {
         widget.initialProfile != null ||
         widget.initialMode != SimulatorMode.freeFlight ||
         widget.initialFlightMode != FlightControlMode.stabilized ||
-        widget.initialTimeOfDay != TimeOfDayPreset.day) {
+        widget.initialTimeOfDay != TimeOfDayPreset.day ||
+        widget.initialCourseDifficulty != CourseDifficulty.medium ||
+        widget.initialCourseDirection != CourseDirection.standard ||
+        widget.initialMissionId != null) {
       _controller.configureSession(
         mode: widget.initialMode,
         map: widget.initialMap ?? FlightMap.dronePark,
         profile: widget.initialProfile ?? DroneProfile.mini249g,
         flightMode: widget.initialFlightMode,
         timeOfDay: widget.initialTimeOfDay,
+        courseDifficulty: widget.initialCourseDifficulty,
+        courseDirection: widget.initialCourseDirection,
+        missionId: widget.initialMissionId,
+        startMissionAutopilot: widget.initialMissionAutopilot,
+        droneTuning: widget.initialDroneTuning,
       );
     }
     _lastIsMapPrimaryView = _controller.isMapPrimaryView;

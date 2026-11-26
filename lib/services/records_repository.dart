@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:drone_simulator/models/drone_profile.dart';
 import 'package:drone_simulator/simulation/quadrotor_physics_6dof.dart';
 
 /// Medalhas de desempenho para corridas cronometradas.
@@ -137,6 +138,9 @@ class MapRecord {
   final double bestFreestyleScore;
   final Map<String, double> bestTimesByProfile;
   final List<GhostFrame> ghostFrames;
+  final Map<String, List<GhostFrame>> ghostFramesByProfile;
+  final Set<String> completedMissions;
+  final bool freestyleChallengeCompleted;
 
   const MapRecord({
     required this.mapId,
@@ -148,10 +152,33 @@ class MapRecord {
     this.bestFreestyleScore = 0.0,
     this.bestTimesByProfile = const {},
     this.ghostFrames = const [],
+    this.ghostFramesByProfile = const {},
+    this.completedMissions = const {},
+    this.freestyleChallengeCompleted = false,
   });
 
   MedalTier get medal => medalForRaceTime(bestRaceTimeSec);
   GhostTrajectory get ghostTrajectory => GhostTrajectory(ghostFrames);
+
+  double? bestTimeForProfile(String profileId) =>
+      bestTimesByProfile[profileId];
+
+  MedalTier medalForProfile(String profileId) =>
+      medalForRaceTime(bestTimesByProfile[profileId]);
+
+  GhostTrajectory ghostTrajectoryForProfile(String profileId) {
+    final profileFrames = ghostFramesByProfile[profileId];
+    if (profileFrames != null && profileFrames.isNotEmpty) {
+      return GhostTrajectory(profileFrames);
+    }
+    if (ghostFramesByProfile.isEmpty &&
+        ghostFrames.isNotEmpty &&
+        (bestTimesByProfile.isEmpty ||
+            bestTimesByProfile.containsKey(profileId))) {
+      return GhostTrajectory(ghostFrames);
+    }
+    return const GhostTrajectory([]);
+  }
 
   MapRecord copyWith({
     double? bestRaceTimeSec,
@@ -162,6 +189,9 @@ class MapRecord {
     double? bestFreestyleScore,
     Map<String, double>? bestTimesByProfile,
     List<GhostFrame>? ghostFrames,
+    Map<String, List<GhostFrame>>? ghostFramesByProfile,
+    Set<String>? completedMissions,
+    bool? freestyleChallengeCompleted,
   }) {
     return MapRecord(
       mapId: mapId,
@@ -173,6 +203,10 @@ class MapRecord {
       bestFreestyleScore: bestFreestyleScore ?? this.bestFreestyleScore,
       bestTimesByProfile: bestTimesByProfile ?? this.bestTimesByProfile,
       ghostFrames: ghostFrames ?? this.ghostFrames,
+      ghostFramesByProfile: ghostFramesByProfile ?? this.ghostFramesByProfile,
+      completedMissions: completedMissions ?? this.completedMissions,
+      freestyleChallengeCompleted:
+          freestyleChallengeCompleted ?? this.freestyleChallengeCompleted,
     );
   }
 
@@ -186,6 +220,12 @@ class MapRecord {
         'bestFreestyleScore': bestFreestyleScore,
         'bestTimesByProfile': bestTimesByProfile,
         'ghostFrames': ghostFrames.map((f) => f.toCompactList()).toList(),
+        'ghostFramesByProfile': {
+          for (final entry in ghostFramesByProfile.entries)
+            entry.key: entry.value.map((f) => f.toCompactList()).toList(),
+        },
+        'completedMissions': completedMissions.toList(),
+        'freestyleChallengeCompleted': freestyleChallengeCompleted,
       };
 
   factory MapRecord.fromJson(Map<String, dynamic> json) {
@@ -206,6 +246,31 @@ class MapRecord {
       }
     }
 
+    final rawGhostByProfile =
+        (json['ghostFramesByProfile'] as Map<String, dynamic>?) ?? const {};
+    final ghostByProfile = <String, List<GhostFrame>>{};
+    for (final entry in rawGhostByProfile.entries) {
+      final rawList = entry.value;
+      if (rawList is List<dynamic>) {
+        final parsed = <GhostFrame>[];
+        for (final item in rawList) {
+          if (item is List<dynamic>) {
+            parsed.add(GhostFrame.fromCompactList(item));
+          }
+        }
+        if (parsed.isNotEmpty) {
+          ghostByProfile[entry.key] = List<GhostFrame>.unmodifiable(parsed);
+        }
+      }
+    }
+
+    final rawMissions =
+        (json['completedMissions'] as List<dynamic>?) ?? const [];
+    final completedMissions = <String>{
+      for (final m in rawMissions)
+        if (m is String && m.isNotEmpty) m,
+    };
+
     return MapRecord(
       mapId: mapId,
       bestRaceTimeSec: (json['bestRaceTimeSec'] as num?)?.toDouble(),
@@ -219,6 +284,10 @@ class MapRecord {
           (json['bestFreestyleScore'] as num?)?.toDouble() ?? 0.0,
       bestTimesByProfile: byProfile,
       ghostFrames: frames,
+      ghostFramesByProfile: ghostByProfile,
+      completedMissions: Set<String>.unmodifiable(completedMissions),
+      freestyleChallengeCompleted:
+          (json['freestyleChallengeCompleted'] as bool?) ?? false,
     );
   }
 }
@@ -274,11 +343,14 @@ class RecordsRepository {
   static const String storageKey = 'drone_simulator_records_v1';
   static const String acroSettingsStorageKey =
       'drone_simulator_acro_settings_v1';
+  static const String droneTuningStorageKey = 'drone_simulator_tuning_v1';
 
   final KeyValueStore _store;
   final Map<String, MapRecord> _records = {};
   AcroSettings _acroSettings = const AcroSettings();
   bool _hasSavedAcroSettings = false;
+  DroneTuning _droneTuning = const DroneTuning();
+  bool _hasSavedDroneTuning = false;
   bool _loaded = false;
 
   RecordsRepository({KeyValueStore? store})
@@ -288,6 +360,8 @@ class RecordsRepository {
   Map<String, MapRecord> get allRecords => Map.unmodifiable(_records);
   AcroSettings get acroSettings => _acroSettings;
   bool get hasSavedAcroSettings => _hasSavedAcroSettings;
+  DroneTuning get droneTuning => _droneTuning;
+  bool get hasSavedDroneTuning => _hasSavedDroneTuning;
 
   MapRecord recordFor(String mapId) =>
       _records[mapId] ?? MapRecord(mapId: mapId);
@@ -320,6 +394,18 @@ class RecordsRepository {
         // JSON corrompido não impede o app de iniciar.
       }
     }
+    final rawTuning = await _store.getString(droneTuningStorageKey);
+    if (rawTuning != null && rawTuning.isNotEmpty) {
+      try {
+        final decodedTuning = jsonDecode(rawTuning);
+        if (decodedTuning is Map<String, dynamic>) {
+          _droneTuning = DroneTuning.fromJson(decodedTuning);
+          _hasSavedDroneTuning = true;
+        }
+      } catch (_) {
+        // JSON corrompido não impede o app de iniciar.
+      }
+    }
     _loaded = true;
   }
 
@@ -332,6 +418,15 @@ class RecordsRepository {
     );
   }
 
+  Future<void> saveDroneTuning(DroneTuning tuning) async {
+    _droneTuning = tuning;
+    _hasSavedDroneTuning = true;
+    await _store.setString(
+      droneTuningStorageKey,
+      jsonEncode(tuning.toJson()),
+    );
+  }
+
   Future<void> _persist() async {
     final payload = <String, dynamic>{
       for (final entry in _records.entries) entry.key: entry.value.toJson(),
@@ -339,7 +434,7 @@ class RecordsRepository {
     await _store.setString(storageKey, jsonEncode(payload));
   }
 
-  /// Salva resultado da corrida de 10 portais e atualiza o Ghost se bater o melhor tempo.
+  /// Salva resultado da corrida de 10 portais e atualiza o Ghost do perfil ao bater o recorde.
   Future<({bool isNewRecord, MapRecord record})> saveRaceResult({
     required String mapId,
     required String profileId,
@@ -349,29 +444,42 @@ class RecordsRepository {
     List<GhostFrame>? ghostFrames,
   }) async {
     final current = recordFor(mapId);
-    final isNewTime = current.bestRaceTimeSec == null ||
+    final isNewGlobalTime = current.bestRaceTimeSec == null ||
         elapsedSeconds < current.bestRaceTimeSec!;
 
     final updatedByProfile = Map<String, double>.from(current.bestTimesByProfile);
     final prevProfileBest = updatedByProfile[profileId];
-    if (prevProfileBest == null || elapsedSeconds < prevProfileBest) {
+    final isNewProfileTime =
+        prevProfileBest == null || elapsedSeconds < prevProfileBest;
+    if (isNewProfileTime) {
       updatedByProfile[profileId] = elapsedSeconds;
     }
 
+    final updatedGhostByProfile = <String, List<GhostFrame>>{
+      for (final entry in current.ghostFramesByProfile.entries)
+        entry.key: List<GhostFrame>.unmodifiable(entry.value),
+    };
+    if (isNewProfileTime && ghostFrames != null && ghostFrames.isNotEmpty) {
+      updatedGhostByProfile[profileId] =
+          List<GhostFrame>.unmodifiable(ghostFrames);
+    }
+
     final updated = current.copyWith(
-      bestRaceTimeSec: isNewTime ? elapsedSeconds : current.bestRaceTimeSec,
+      bestRaceTimeSec:
+          isNewGlobalTime ? elapsedSeconds : current.bestRaceTimeSec,
       bestRaceScore: math.max(current.bestRaceScore, score),
       bestCombo: math.max(current.bestCombo, bestCombo),
       bestTimesByProfile: updatedByProfile,
       ghostFrames:
-          (isNewTime && ghostFrames != null && ghostFrames.isNotEmpty)
+          (isNewGlobalTime && ghostFrames != null && ghostFrames.isNotEmpty)
               ? List<GhostFrame>.unmodifiable(ghostFrames)
               : current.ghostFrames,
+      ghostFramesByProfile: updatedGhostByProfile,
     );
 
     _records[mapId] = updated;
     await _persist();
-    return (isNewRecord: isNewTime, record: updated);
+    return (isNewRecord: isNewProfileTime, record: updated);
   }
 
   Future<({bool isNewRecord, MapRecord record})> saveTimeAttackResult({
@@ -399,6 +507,7 @@ class RecordsRepository {
     required String mapId,
     required double score,
     required int bestCombo,
+    bool challengeCompleted = false,
   }) async {
     final current = recordFor(mapId);
     final isNewBest = score > current.bestFreestyleScore;
@@ -406,9 +515,26 @@ class RecordsRepository {
     final updated = current.copyWith(
       bestFreestyleScore: math.max(current.bestFreestyleScore, score),
       bestCombo: math.max(current.bestCombo, bestCombo),
+      freestyleChallengeCompleted:
+          current.freestyleChallengeCompleted || challengeCompleted,
     );
     _records[mapId] = updated;
     await _persist();
     return (isNewRecord: isNewBest, record: updated);
+  }
+
+  Future<MapRecord> saveMissionCompleted({
+    required String mapId,
+    required String missionId,
+  }) async {
+    final current = recordFor(mapId);
+    final updatedMissions = Set<String>.from(current.completedMissions)
+      ..add(missionId);
+    final updated = current.copyWith(
+      completedMissions: Set<String>.unmodifiable(updatedMissions),
+    );
+    _records[mapId] = updated;
+    await _persist();
+    return updated;
   }
 }
