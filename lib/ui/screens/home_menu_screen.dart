@@ -668,14 +668,25 @@ class _HomeMenuScreenState extends State<HomeMenuScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(7),
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(
-                    color: Colors.cyanAccent.withOpacity(0.16),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: Colors.cyanAccent.withOpacity(0.6)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.cyanAccent.withOpacity(0.18),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
-                  child: const Icon(Icons.flight_takeoff,
-                      color: Colors.cyanAccent, size: 20),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Image.asset(
+                      'assets/images/app_logo.png',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
                 const Column(

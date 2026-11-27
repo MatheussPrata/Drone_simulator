@@ -69,5 +69,11 @@
 - Removida a dependência `flutter_riverpod` do [pubspec.yaml](pubspec.yaml) (usada apenas pela árvore legada).
 - Mantido `lib/engine/flight_physics_engine.dart` (ainda usado por `lib/simulation/flight_physics.dart`, `SimulatorController` e testes).
 
+### Concluído (Logo e Ícones do App)
+- Adicionados `assets/images/app_logo.png` e `assets/images/app_banner.png` e registrados em [pubspec.yaml](pubspec.yaml).
+- Gerados os ícones `ic_launcher.png` em todas as densidades Android (`mipmap-mdpi` a `mipmap-xxxhdpi`).
+- Integrada a logo no cabeçalho de `HomeMenuScreen` ([home_menu_screen.dart](lib/ui/screens/home_menu_screen.dart)).
+- Validação: `flutter analyze --no-fatal-infos --no-fatal-warnings` (`No issues found!`) e `flutter test` (**187 testes passando**).
+
 ### Próximo Passo Pendente
 - Roadmap de melhorias (Blocos 1–5) concluído. Próximos passos dependem de novas solicitações (ex.: gerar APK sob demanda).
